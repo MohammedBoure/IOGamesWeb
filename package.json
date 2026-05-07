@@ -1,0 +1,20 @@
+{
+  "name": "neon-aim-arena",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check:visual": "node scripts/visual-check.mjs",
+    "serve": "node scripts/serve-dist.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "latest"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.1",
+    "vite": "latest"
+  }
+}

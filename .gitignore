@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.vscode/
+node_modules/
+dist/
+test-results/
+*.log
+backend/logs/
+__pycache__/
+*.py[cod]

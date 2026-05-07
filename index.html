@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#dcefff" />
+    <title>Neon Aim Arena</title>
+  </head>
+  <body>
+    <main id="app" aria-label="Neon Aim Arena">
+      <div id="game"></div>
+
+      <div class="hud" aria-hidden="false">
+        <div id="scoreboard" class="scoreboard">
+          <div class="score-heading">
+            <span>SCORE</span>
+            <strong>HP | K/D</strong>
+          </div>
+          <div id="scoreRows" class="score-rows">
+            <div class="score-empty">Deathmatch</div>
+          </div>
+        </div>
+
+        <div class="crosshair">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+          <b></b>
+        </div>
+
+        <div id="pulseMarker" class="pulse-marker">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+
+        <div class="hud-bottom">
+          <div class="motion-panel">
+            <div class="meter">
+              <span>الطاقة</span>
+              <div class="meter-track"><i id="boostBar"></i></div>
+              <strong id="boostValue">100</strong>
+            </div>
+            <div class="meter pulse">
+              <span>BHOP</span>
+              <div class="meter-track"><i id="pulseBar"></i></div>
+              <strong id="pulseValue">0x</strong>
+            </div>
+          </div>
+
+          <div class="race-panel">
+            <div class="race-stat">
+              <span>Lap</span>
+              <strong id="raceLapValue">1/3</strong>
+            </div>
+            <div class="race-stat">
+              <span>Checkpoint</span>
+              <strong id="raceCheckpointValue">1/4</strong>
+            </div>
+          </div>
+
+          <div class="speed-box">
+            <span>السرعة</span>
+            <strong id="speedValue">0</strong>
+          </div>
+        </div>
+
+        <div id="statusToast" class="status-toast"></div>
+      </div>
+
+      <section id="startScreen" class="overlay active">
+        <div class="modal">
+          <p class="eyebrow">NEON AIM ARENA</p>
+          <h1>ساحة التصويب</h1>
+          <p class="brief">أساس deathmatch واضح الرؤية، حركة سريعة، وتصويب نظيف.</p>
+          <div class="mode-selector" aria-label="Game mode">
+            <button id="shooterModeButton" class="mode-button active" type="button">Shooter</button>
+            <button id="racingModeButton" class="mode-button" type="button">Car Racing</button>
+          </div>
+          <div class="network-panel">
+            <label>
+              <span>الاسم</span>
+              <input id="playerNameInput" type="text" maxlength="32" value="Player" autocomplete="off" />
+            </label>
+            <label>
+              <span>السيرفر</span>
+              <input id="serverUrlInput" type="text" value="" autocomplete="off" dir="ltr" />
+            </label>
+            <label>
+              <span>Match ID</span>
+              <input id="matchIdInput" type="text" placeholder="اتركه فارغا عند إنشاء مباراة" autocomplete="off" dir="ltr" />
+            </label>
+            <div class="network-actions">
+              <button id="connectButton" class="ghost-button compact" type="button">اتصال</button>
+              <button id="createMatchButton" class="ghost-button compact" type="button">إنشاء مباراة</button>
+              <button id="joinMatchButton" class="ghost-button compact" type="button">انضمام</button>
+            </div>
+            <p id="networkStatus" class="network-status">غير متصل</p>
+          </div>
+          <button id="startButton" class="primary-button" type="button">دخول الساحة</button>
+        </div>
+      </section>
+
+      <section id="pauseScreen" class="overlay">
+        <div class="modal settings-modal">
+          <p class="eyebrow">متوقف</p>
+          <h2>الإعدادات</h2>
+          <div class="menu-actions">
+            <button id="resumeButton" class="primary-button" type="button">متابعة</button>
+            <button id="restartButton" class="ghost-button" type="button">إعادة التموضع</button>
+          </div>
+          <div class="network-panel settings-panel">
+            <label>
+              <span>Session ID</span>
+              <input id="sessionIdValue" type="text" value="بدون جلسة" readonly dir="ltr" />
+            </label>
+            <label>
+              <span>الاسم</span>
+              <input id="settingsPlayerNameInput" type="text" maxlength="32" value="Player" autocomplete="off" />
+            </label>
+            <label>
+              <span>IP / WS</span>
+              <input id="settingsServerUrlInput" type="text" value="" autocomplete="off" dir="ltr" />
+            </label>
+            <label>
+              <span>Match ID</span>
+              <input id="settingsMatchIdInput" type="text" placeholder="match_xxxxxxxxxx" autocomplete="off" dir="ltr" />
+            </label>
+            <div class="network-actions">
+              <button id="settingsConnectButton" class="ghost-button compact" type="button">اتصال</button>
+              <button id="settingsCreateMatchButton" class="ghost-button compact" type="button">إنشاء</button>
+              <button id="settingsJoinMatchButton" class="ghost-button compact" type="button">انضمام</button>
+              <button id="settingsDisconnectButton" class="ghost-button compact danger" type="button">فصل</button>
+            </div>
+            <p id="settingsNetworkStatus" class="network-status">غير متصل</p>
+          </div>
+          <label class="slider-row">
+            <span>الحساسية</span>
+            <input id="sensitivitySlider" type="range" min="0.5" max="2.2" step="0.05" value="1" />
+          </label>
+        </div>
+      </section>
+
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
