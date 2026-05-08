@@ -153,16 +153,19 @@ class MatchManager:
 
     async def create_match(self, player_id: str, payload: JsonDict) -> None:
         settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
-        match = Match(
-            id=short_id("match"),
-            host_id=player_id,
-            mode=sanitize_mode(settings.get("mode", "deathmatch")),
-            map_name=sanitize_mode(settings.get("map", "aim_arena")),
-            max_players=clamp_int(settings.get("max_players", 12), 2, 24),
-        )
+        match_mode = sanitize_mode(settings.get("mode", "deathmatch"))
+        map_name = sanitize_mode(settings.get("map", "aim_arena"))
+        max_players = clamp_int(settings.get("max_players", 12), 2, 24)
 
         async with self._lock:
             player = self._require_player_locked(player_id)
+            match = Match(
+                id=match_code(self._matches),
+                host_id=player_id,
+                mode=match_mode,
+                map_name=map_name,
+                max_players=max_players,
+            )
             events = self._leave_match_locked(player_id, reason="switch_match")
             match.players.add(player_id)
             player.match_id = match.id
@@ -187,6 +190,9 @@ class MatchManager:
         )
 
     async def join_match(self, player_id: str, match_id: str) -> None:
+        match_id = match_id.strip()
+        if not re.fullmatch(r"\d{6}", match_id):
+            raise ClientMessageError("invalid_match_id", "Match ID must be 6 digits.")
         async with self._lock:
             player = self._require_player_locked(player_id)
             match = self._matches.get(match_id)
@@ -201,6 +207,8 @@ class MatchManager:
             else:
                 events = self._leave_match_locked(player_id, reason="switch_match")
                 match.players.add(player_id)
+                if match.host_id not in match.players:
+                    match.host_id = player_id
                 player.match_id = match.id
                 player.ready = False
                 reset_combat_player(player)
@@ -453,7 +461,7 @@ class MatchManager:
 
         match.players.discard(player_id)
         if not match.players:
-            self._matches.pop(old_match_id, None)
+            match.status = "lobby"
             return events
 
         if match.host_id == player_id:
@@ -660,6 +668,20 @@ def sanitize_mode(value: Any) -> str:
 
 def short_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:10]}"
+
+
+def match_code(matches: dict[str, Match]) -> str:
+    for _ in range(100):
+        code = str(random.randint(100000, 999999))
+        if code not in matches:
+            return code
+
+    for code_number in range(100000, 1000000):
+        code = str(code_number)
+        if code not in matches:
+            return code
+
+    raise ClientMessageError("match_capacity", "No match codes are available.")
 
 
 def utc_now() -> str:

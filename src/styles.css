@@ -40,6 +40,322 @@ input {
   font: inherit;
 }
 
+.library-view {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: clamp(18px, 3vw, 34px);
+  overflow: auto;
+  padding: clamp(18px, 4vw, 54px);
+  color: var(--ink);
+  background:
+    linear-gradient(180deg, rgba(220, 239, 255, 0.92), rgba(246, 250, 252, 0.98)),
+    #dcefff;
+}
+
+.library-topbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  padding-block: 14px;
+}
+
+.library-topbar h1 {
+  margin: 0;
+  font-size: clamp(42px, 7vw, 82px);
+  line-height: 1;
+}
+
+.profile-control {
+  display: grid;
+  gap: 7px;
+  width: min(280px, 100%);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.profile-control input,
+.room-panel input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(34, 73, 88, 0.2);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.library-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(320px, 440px);
+  align-items: start;
+  gap: clamp(16px, 3vw, 28px);
+}
+
+.games-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.game-card {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 230px;
+  border: 1px solid rgba(34, 73, 88, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: right;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 60px rgba(44, 82, 96, 0.12);
+}
+
+.game-card.selected {
+  border-color: rgba(27, 141, 255, 0.48);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 22px 70px rgba(27, 141, 255, 0.16);
+}
+
+.game-accent {
+  grid-row: 1 / span 2;
+  width: 10px;
+  min-height: 100%;
+  border-radius: 999px;
+  background: var(--blue);
+}
+
+.game-accent.green {
+  background: var(--green);
+}
+
+.game-thumb {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: rgba(16, 32, 40, 0.12);
+}
+
+.game-thumb::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(180deg, transparent 45%, rgba(16, 32, 40, 0.28));
+  pointer-events: none;
+}
+
+.game-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.game-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.game-card strong {
+  overflow-wrap: anywhere;
+  font-size: 22px;
+  line-height: 1.05;
+}
+
+.game-card small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.room-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: clamp(18px, 3vw, 26px);
+  background: var(--panel-strong);
+  box-shadow: 0 26px 82px rgba(44, 82, 96, 0.16);
+}
+
+.room-panel h2 {
+  font-size: clamp(30px, 5vw, 48px);
+}
+
+.room-panel label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.room-actions .primary-button,
+.room-actions .ghost-button {
+  margin-top: 0;
+}
+
+.game-shell {
+  position: fixed;
+  inset: 0;
+}
+
+.back-to-games {
+  position: fixed;
+  z-index: 8;
+  top: clamp(14px, 2.4vh, 26px);
+  right: clamp(14px, 2.4vw, 26px);
+  min-height: 38px;
+  border: 1px solid rgba(34, 73, 88, 0.22);
+  border-radius: 8px;
+  padding: 0 14px;
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 14px 44px rgba(44, 82, 96, 0.14);
+}
+
+.game-load-status {
+  position: fixed;
+  z-index: 7;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  font-weight: 800;
+  background: #dcefff;
+}
+
+.room-dialog-backdrop {
+  position: fixed;
+  z-index: 6;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(220, 239, 255, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.room-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(460px, 100%);
+  border: 1px solid rgba(34, 73, 88, 0.22);
+  border-radius: 8px;
+  padding: clamp(20px, 4vw, 30px);
+  color: var(--ink);
+  text-align: right;
+  background: var(--panel-strong);
+  box-shadow: 0 32px 100px rgba(44, 82, 96, 0.22);
+}
+
+.room-dialog h2 {
+  margin: 0;
+  font-size: clamp(30px, 6vw, 46px);
+  line-height: 1;
+}
+
+.room-dialog label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dialog-actions .primary-button,
+.dialog-actions .ghost-button {
+  margin-top: 0;
+}
+
+.room-share-panel {
+  position: fixed;
+  z-index: 9;
+  left: clamp(14px, 2.4vw, 26px);
+  bottom: clamp(14px, 3vh, 28px);
+  display: grid;
+  gap: 12px;
+  width: min(430px, calc(100vw - 28px));
+  border: 1px solid rgba(34, 73, 88, 0.2);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--ink);
+  background: rgba(250, 253, 255, 0.96);
+  box-shadow: 0 28px 90px rgba(44, 82, 96, 0.22);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.room-share-panel h2 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.room-share-panel label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.copy-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.copy-field input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(34, 73, 88, 0.2);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.copy-field button {
+  min-width: 68px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.room-share-note {
+  margin: 0;
+  color: #39525d;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 #game,
 #game canvas {
   position: fixed;
@@ -631,6 +947,45 @@ h2 {
 }
 
 @media (max-width: 760px) {
+  .library-view {
+    padding: 18px;
+  }
+
+  .library-topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .library-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .games-list {
+    grid-template-columns: 1fr;
+  }
+
+  .game-card {
+    min-height: 0;
+  }
+
+  .room-actions .primary-button,
+  .room-actions .ghost-button {
+    width: 100%;
+  }
+
+  .back-to-games {
+    top: 10px;
+    right: 10px;
+  }
+
+  .room-share-panel {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+    padding: 14px;
+  }
+
   .readout {
     width: auto;
     min-width: 0;

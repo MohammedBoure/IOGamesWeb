@@ -1,33 +1,34 @@
 # IOGamesWeb
 
-مشروع ألعاب ويب أونلاين قابل للتوسع. النسخة الحالية تحتوي على لعبة **Neon Aim Arena**، وهي تجربة 3D مبنية بالواجهة الأمامية على Vite وThree.js، ومعها Backend بسيط بـ FastAPI وWebSocket لإدارة اللاعبين والمباريات.
+Scalable online web games. The current build includes **Neon Aim Arena**, a 3D browser game built with Vite and Three.js, plus a FastAPI/WebSocket backend for players and matches.
 
-## المميزات الحالية
+## Current Features
 
-- واجهة 3D تعمل داخل المتصفح.
-- طور تصويب وحركة سريع.
-- طور سباق داخل نفس الساحة.
-- اتصال WebSocket للعب الجماعي.
-- إنشاء مباراة أو الانضمام إلى مباراة موجودة.
-- إعدادات نشر عبر ملف `.env`.
+- Browser-based 3D gameplay.
+- Fast shooter movement and aiming.
+- A racing mode in the same arena runtime.
+- WebSocket multiplayer.
+- Create a match or join an existing match.
+- Simple 6-digit Match IDs.
+- Deployment settings through `.env`.
 
-## المتطلبات
+## Requirements
 
 - Node.js
-- Python 3.11 أو أحدث
+- Python 3.11 or newer
 - Git
 
-## إعداد ملف البيئة
+## Environment Setup
 
-انسخ ملف المثال إلى ملف محلي:
+Copy the example file into a local `.env` file:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-لا ترفع ملف `.env` إلى GitHub لأنه مخصص للقيم المحلية أو السرية. الملف المسموح رفعه هو `.env.example`.
+Do not commit `.env` to GitHub. It is meant for local or private deployment values. Commit `.env.example` instead.
 
-أهم القيم:
+Important values:
 
 ```env
 VITE_WS_URL=ws://127.0.0.1:8000/ws
@@ -36,7 +37,7 @@ BACKEND_PORT=8000
 BACKEND_CORS_ORIGINS=*
 ```
 
-في الإنتاج استخدم رابط WebSocket آمن:
+Use a secure WebSocket URL in production:
 
 ```env
 VITE_WS_URL=wss://your-backend-domain.com/ws
@@ -44,27 +45,41 @@ BACKEND_CORS_ORIGINS=https://your-frontend-domain.com
 BACKEND_RELOAD=false
 ```
 
-## تشغيل الواجهة الأمامية
+## Frontend
 
-من جذر المشروع:
+From the project root:
 
 ```powershell
 npm install
 npm run dev
 ```
 
-لإنشاء نسخة إنتاج:
+To create a production build:
 
 ```powershell
 npm run build
 npm run preview
 ```
 
-ملاحظة: متغيرات Vite التي تبدأ بـ `VITE_` يتم تضمينها وقت البناء، لذلك أعد تشغيل `npm run build` بعد تغيير `VITE_WS_URL`.
+Vite embeds `VITE_` variables at build time, so rebuild after changing `VITE_WS_URL`.
 
-## تشغيل الـ Backend
+## Frontend Structure
 
-من مجلد `backend`:
+The frontend is organized around an app shell that can host more games:
+
+- `src/main.js`: app entry point only.
+- `src/ui/appShell.js`: game library, player name, and room create/join flow.
+- `src/shared/playerProfile.js`: stores the player name in `localStorage`.
+- `src/games/catalog.js`: list of games shown on the home screen.
+- `src/games/<game>/index.js`: isolated entry point for each game.
+- `src/games/shared/`: shared runtime or assets used only when needed.
+- `public/assets/games/`: game images used in the library.
+
+To add a game later, create a new folder in `src/games/`, export `mountGame(options)`, then register it in `src/games/catalog.js`.
+
+## Backend
+
+From the `backend` folder:
 
 ```powershell
 cd backend
@@ -72,48 +87,49 @@ pip install -r requirements.txt
 python run.py
 ```
 
-رابط فحص الحالة:
+Health check:
 
 ```text
 http://127.0.0.1:8000/health
 ```
 
-رابط WebSocket المحلي:
+Local WebSocket URL:
 
 ```text
 ws://127.0.0.1:8000/ws
 ```
 
-## التحكم
+## Controls
 
-- `Z`: أمام
-- `S`: خلف
-- `Q`: يسار
-- `D`: يمين
-- `Space`: قفز
+- `Z`: forward
+- `S`: backward
+- `Q`: left
+- `D`: right
+- `Space`: jump
 - `Ctrl + Mouse Wheel Up`: bunnyhop
 - `Ctrl + Mouse Wheel Down`: fast slide
-- `Mouse`: النظر
-- `Left Click`: إطلاق
-- `X`: الرجوع إلى القائمة
-- `Esc`: إيقاف مؤقت
+- `Mouse`: look
+- `Left Click`: shoot
+- `X`: return to game library
+- `Esc`: pause
 
-## اللعب الجماعي
+## Multiplayer
 
-من القائمة الرئيسية:
+From the home screen:
 
-1. اكتب اسم اللاعب.
-2. تأكد أن رابط السيرفر هو قيمة `VITE_WS_URL` أو رابط backend المنشور.
-3. اضغط اتصال.
-4. اضغط إنشاء مباراة أو أدخل `Match ID` ثم اضغط انضمام.
+1. Enter the player name.
+2. Choose a game.
+3. Click `Create Room` to get a 6-digit Match ID.
+4. Send the Match ID to another player.
+5. The other player enters the same Match ID and clicks `Join Room`.
 
-يمكن الوصول لحالة اللاعب محليا من المتصفح عبر:
+The local player snapshot is available in the browser:
 
 ```js
 window.NeonAimNet.getLocalSnapshot()
 ```
 
-## التوثيق الإضافي
+## More Documentation
 
-- إعدادات النشر: `DEPLOYMENT.md`
-- تفاصيل الـ Backend: `backend/README.md`
+- Deployment settings: `DEPLOYMENT.md`
+- Backend details: `backend/README.md`

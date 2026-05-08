@@ -1,18 +1,18 @@
 # IOGamesWeb Backend
 
-Backend بسيط مبني بـ FastAPI لإدارة اللاعبين والمباريات عبر WebSocket. الحالة الحالية محفوظة في الذاكرة، لذلك تختفي المباريات عند إعادة تشغيل السيرفر.
+A small FastAPI backend for WebSocket players and matches. State is currently stored in memory, so matches disappear when the server restarts.
 
-## الإعداد
+## Setup
 
-من جذر المشروع انسخ ملف البيئة:
+From the project root, copy the environment example:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-يمكن أيضا إنشاء ملف `backend/.env` إذا أردت قيما خاصة بالـ backend فقط. قيم `backend/.env` تتغلب على قيم `.env` في جذر المشروع.
+You can also create `backend/.env` for backend-only values. Values in `backend/.env` override values from the project root `.env`.
 
-## التشغيل
+## Run
 
 ```powershell
 cd backend
@@ -22,7 +22,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-## متغيرات البيئة
+## Environment Variables
 
 ```env
 BACKEND_HOST=127.0.0.1
@@ -36,7 +36,7 @@ BACKEND_APP_TITLE=Neon Aim Arena Backend
 BACKEND_APP_VERSION=0.1.0
 ```
 
-في الإنتاج يفضل ضبط CORS على رابط الواجهة فقط:
+In production, set CORS to the frontend origin only:
 
 ```env
 BACKEND_HOST=0.0.0.0
@@ -44,9 +44,9 @@ BACKEND_RELOAD=false
 BACKEND_CORS_ORIGINS=https://your-frontend-domain.com
 ```
 
-إذا كان مزود الاستضافة يعطيك متغير `PORT`، فإن `backend/run.py` يستطيع استخدامه تلقائيا عند عدم ضبط `BACKEND_PORT`.
+If your host provides a `PORT` variable, `backend/run.py` can use it automatically when `BACKEND_PORT` is not set.
 
-## الروابط
+## URLs
 
 ```text
 GET http://127.0.0.1:8000/health
@@ -54,9 +54,9 @@ GET http://127.0.0.1:8000/matches
 WS  ws://127.0.0.1:8000/ws?player_name=Player
 ```
 
-## رسائل WebSocket
+## WebSocket Messages
 
-إنشاء مباراة:
+Create a match:
 
 ```json
 {
@@ -69,16 +69,16 @@ WS  ws://127.0.0.1:8000/ws?player_name=Player
 }
 ```
 
-الانضمام إلى مباراة:
+Join a match:
 
 ```json
 {
   "type": "join_match",
-  "match_id": "match_xxxxxxxxxx"
+  "match_id": "123456"
 }
 ```
 
-تحديث حالة اللاعب:
+Update player state:
 
 ```json
 {
@@ -93,7 +93,7 @@ WS  ws://127.0.0.1:8000/ws?player_name=Player
 }
 ```
 
-إرسال إطلاق:
+Send a shot:
 
 ```json
 {
@@ -107,7 +107,7 @@ WS  ws://127.0.0.1:8000/ws?player_name=Player
 }
 ```
 
-رسائل أخرى:
+Other messages:
 
 ```json
 { "type": "list_matches" }
@@ -117,7 +117,7 @@ WS  ws://127.0.0.1:8000/ws?player_name=Player
 { "type": "ping" }
 ```
 
-## ملاحظات
+## Notes
 
-- هذه نسخة أولية، والحالة in-memory فقط.
-- يمكن لاحقا إضافة قاعدة بيانات أو Redis، نظام غرف دائم، مصادقة، وتحسين مزامنة الحركة بين اللاعبين.
+- This is an early version and state is in memory only.
+- A database or Redis can be added later for persistent rooms, authentication, and stronger movement synchronization.
