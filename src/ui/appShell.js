@@ -44,6 +44,20 @@ const GAME_VIEW_HTML = `
       <i></i>
     </div>
 
+    <div id="combatFeed" class="combat-feed" aria-live="polite"></div>
+
+    <div id="weaponPanel" class="weapon-panel">
+      <div class="weapon-panel-head">
+        <span id="weaponSlotLabel">1</span>
+        <strong id="weaponNameValue">Rifle</strong>
+      </div>
+      <div class="weapon-panel-body">
+        <strong id="weaponAmmoValue">--</strong>
+        <span id="weaponStateValue">READY</span>
+      </div>
+      <div class="reload-track"><i id="weaponReloadBar"></i></div>
+    </div>
+
     <div class="hud-bottom">
       <div class="motion-panel">
         <div class="meter">

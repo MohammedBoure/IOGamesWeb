@@ -54,6 +54,13 @@ const hud = {
   scoreboard: document.querySelector("#scoreboard"),
   scoreRows: document.querySelector("#scoreRows"),
   crosshair: document.querySelector(".crosshair"),
+  combatFeed: document.querySelector("#combatFeed"),
+  weaponPanel: document.querySelector("#weaponPanel"),
+  weaponSlotLabel: document.querySelector("#weaponSlotLabel"),
+  weaponNameValue: document.querySelector("#weaponNameValue"),
+  weaponAmmoValue: document.querySelector("#weaponAmmoValue"),
+  weaponStateValue: document.querySelector("#weaponStateValue"),
+  weaponReloadBar: document.querySelector("#weaponReloadBar"),
   raceLapValue: document.querySelector("#raceLapValue"),
   raceCheckpointValue: document.querySelector("#raceCheckpointValue"),
   pulseMarker: document.querySelector("#pulseMarker"),
@@ -169,7 +176,7 @@ const worldModelCache = new Map();
 const keys = new Set();
 const MOVEMENT_KEYS = new Set(["z", "s", "q", "d"]);
 const WEAPON_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
-const GAMEPLAY_KEYS = new Set(["z", "s", "q", "d", " ", "control", "ctrl", "x", ...WEAPON_KEYS]);
+const GAMEPLAY_KEYS = new Set(["z", "s", "q", "d", " ", "control", "ctrl", "r", "x", ...WEAPON_KEYS]);
 const DEFAULT_SERVER_URL = runtimeOptions.serverUrl || import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws";
 const DEFAULT_PLAYER_NAME = runtimeOptions.playerName || import.meta.env.VITE_DEFAULT_PLAYER_NAME || "Player";
 const BACKEND_ACCESS_TOKEN = runtimeOptions.accessToken || import.meta.env.VITE_BACKEND_ACCESS_TOKEN || "";
@@ -218,6 +225,8 @@ const state = {
   weaponSlot: 0,
   weaponSwitchTimer: 0
 };
+
+const weaponStates = new Map();
 
 const velocity = new THREE.Vector3();
 const wishDir = new THREE.Vector3();
@@ -1166,6 +1175,8 @@ function getWeaponProfile(asset = {}) {
     damage: THREE.MathUtils.clamp(Number(fire.damage) || 1, 1, 5),
     spread: Number(fire.spread) || 0.001,
     projectiles: THREE.MathUtils.clamp(Math.trunc(Number(fire.projectiles) || 1), 1, 12),
+    magazine: THREE.MathUtils.clamp(Math.trunc(Number(fire.magazine) || getDefaultMagazine(style)), 1, 60),
+    reloadTime: THREE.MathUtils.clamp(Number(fire.reloadTime) || getDefaultReloadTime(style), 0.35, 3),
     recoil: Number(fire.recoil) || 0.12,
     pitchKick: Number(fire.pitchKick) || 0.004,
     yawKick: Number(fire.yawKick) || 0.002,
@@ -1184,6 +1195,30 @@ function getWeaponProfile(asset = {}) {
     pelletMinRange: Math.max(0.5, Number(fire.pelletMinRange) || 0),
     pelletRadiusVariance: THREE.MathUtils.clamp(Number(fire.pelletRadiusVariance) || 0, 0, 0.8)
   };
+}
+
+function getDefaultMagazine(style) {
+  return {
+    sidearm: 8,
+    "hand-cannon": 5,
+    shotgun: 3,
+    rifle: 28,
+    sniper: 1,
+    ray: 24,
+    lightning: 14
+  }[style] ?? 18;
+}
+
+function getDefaultReloadTime(style) {
+  return {
+    sidearm: 0.9,
+    "hand-cannon": 1.15,
+    shotgun: 1.35,
+    rifle: 1.35,
+    sniper: 1.55,
+    ray: 1.1,
+    lightning: 1.25
+  }[style] ?? 1.2;
 }
 
 function mountWeaponModel() {
@@ -1605,6 +1640,7 @@ function selectWeaponSlot(slot, announce = true) {
   state.weaponSwitchTimer = WEAPON_SWITCH_TIME;
   applyWeaponViewPose(entry.asset);
   positionWeaponMuzzle(entry.asset);
+  getWeaponRuntimeState(getWeaponProfile(entry.asset));
 
   loadModelEntry(entry).then((modelSource) => {
     if (disposed || state.weaponSlot !== nextSlot || !modelSource) {
@@ -1619,6 +1655,7 @@ function selectWeaponSlot(slot, announce = true) {
   }
   updateLocalSnapshot();
   sendNetworkUpdate(1);
+  updateHud();
   return true;
 }
 
@@ -1704,7 +1741,11 @@ function setupEvents() {
       state.jumpQueued = true;
     }
     if (key === "r") {
-      restartGame(true);
+      if (state.mode === GAME_MODES.SHOOTER && state.running && !state.paused) {
+        beginReload(getSelectedWeaponProfile(), true);
+      } else {
+        restartGame(true);
+      }
     }
     if (key === "x") {
       exitToMenu();
@@ -1877,6 +1918,7 @@ function resetRound(lockPointer) {
   state.stamina = 100;
   state.fireTimer = 0;
   state.weaponSwitchTimer = 0;
+  resetWeaponInventory();
   state.verticalVelocity = 0;
   state.coyote = 0;
   state.grounded = false;
@@ -2171,6 +2213,7 @@ function updateGame(dt, time) {
   }
 
   state.fireTimer = Math.max(0, state.fireTimer - dt);
+  updateWeaponInventory(dt);
   state.bhopBuffer = Math.max(0, state.bhopBuffer - dt);
   state.fastSlideBuffer = Math.max(0, state.fastSlideBuffer - dt);
   state.slideTimer = Math.max(0, state.slideTimer - dt);
@@ -2556,10 +2599,18 @@ function shoot() {
   }
 
   const profile = getSelectedWeaponProfile();
+  const ammoState = getWeaponRuntimeState(profile);
+  if (ammoState.reloadTimer > 0) {
+    return;
+  }
+  if (ammoState.ammo <= 0) {
+    beginReload(profile);
+    return;
+  }
+
+  ammoState.ammo -= 1;
   state.fireTimer = profile.interval;
-  state.recoil = Math.min(state.recoil + profile.recoil * 0.78, 0.92);
-  pitch.rotation.x = THREE.MathUtils.clamp(pitch.rotation.x - profile.pitchKick * 0.58 - state.recoil * 0.00065, -1.34, 1.2);
-  player.rotation.y += randomRange(-profile.yawKick, profile.yawKick) * 0.18;
+  applyWeaponRecoil(profile);
   weapon.flash.visible = true;
   weapon.flashTimer = profile.style === "ray" ? 0.07 : profile.style === "sniper" ? 0.085 : 0.045;
   weapon.flashBaseScale = profile.flashScale * (profile.projectiles > 1 ? 1.08 : 1);
@@ -2598,7 +2649,90 @@ function shoot() {
     audio.miss();
   }
 
+  if (ammoState.ammo <= 0) {
+    beginReload(profile);
+  }
   updateHud();
+}
+
+function applyWeaponRecoil(profile) {
+  const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
+  const airPressure = state.grounded ? 0 : 1;
+  const styleScale = {
+    sidearm: [0.78, 0.85],
+    "hand-cannon": [1.18, 1.12],
+    shotgun: [1.28, 1.35],
+    rifle: [0.82, 0.94],
+    sniper: [1.6, 1.18],
+    ray: [0.28, 0.36],
+    lightning: [0.95, 1.28]
+  }[profile.style] ?? [1, 1];
+  const recoilLift = profile.recoil * styleScale[0] * (0.78 + speedPressure * 0.12 + airPressure * 0.12);
+  const yawScale = profile.yawKick * styleScale[1] * (0.12 + state.recoil * 0.18 + speedPressure * 0.08);
+  state.recoil = Math.min(state.recoil + recoilLift, 1.15);
+  pitch.rotation.x = THREE.MathUtils.clamp(
+    pitch.rotation.x - profile.pitchKick * styleScale[0] * 0.6 - state.recoil * 0.00065,
+    -1.34,
+    1.2
+  );
+  const recoilBias = profile.style === "rifle" ? Math.sin(clock.elapsedTime * 23) * 0.35 : 0;
+  player.rotation.y += randomRange(-yawScale, yawScale) + recoilBias * yawScale;
+}
+
+function getWeaponRuntimeState(profile = getSelectedWeaponProfile()) {
+  const key = profile.id;
+  const magazine = profile.magazine;
+  let weaponState = weaponStates.get(key);
+  if (!weaponState || weaponState.magazine !== magazine) {
+    weaponState = {
+      ammo: magazine,
+      magazine,
+      reloadTimer: 0,
+      reloadDuration: profile.reloadTime
+    };
+    weaponStates.set(key, weaponState);
+  }
+  return weaponState;
+}
+
+function updateWeaponInventory(dt) {
+  for (const [weaponId, weaponState] of weaponStates) {
+    if (weaponState.reloadTimer <= 0) {
+      continue;
+    }
+    weaponState.reloadTimer = Math.max(0, weaponState.reloadTimer - dt);
+    if (weaponState.reloadTimer <= 0) {
+      weaponState.ammo = weaponState.magazine;
+      weaponState.reloadDuration = 0;
+      if (weaponId === getSelectedWeaponProfile().id) {
+        audio.reloadReady();
+      }
+    }
+  }
+}
+
+function beginReload(profile = getSelectedWeaponProfile(), manual = false) {
+  const weaponState = getWeaponRuntimeState(profile);
+  if (weaponState.reloadTimer > 0 || weaponState.ammo >= profile.magazine) {
+    return false;
+  }
+  weaponState.reloadDuration = profile.reloadTime;
+  weaponState.reloadTimer = profile.reloadTime;
+  state.fireTimer = Math.max(state.fireTimer, Math.min(0.18, profile.interval));
+  if (manual) {
+    state.firing = false;
+  }
+  audio.reload(profile);
+  updateHud();
+  return true;
+}
+
+function resetWeaponInventory() {
+  weaponStates.clear();
+  for (const entry of runtimeModels.weapons) {
+    const profile = getWeaponProfile(entry.asset);
+    getWeaponRuntimeState(profile);
+  }
 }
 
 function getProjectileProfile(profile) {
@@ -2619,6 +2753,8 @@ function getProjectileProfile(profile) {
 
 function createShotDirection(baseDirection, profile, projectileIndex = 0) {
   const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
+  const airPressure = state.grounded ? 0 : 1;
+  const movementSpread = 1 + speedPressure * 0.34 + airPressure * (profile.style === "sniper" ? 1.15 : 0.44) + state.recoil * 0.28;
   if (profile.style === "shotgun") {
     const direction = baseDirection.clone().normalize();
     const right = new THREE.Vector3().crossVectors(direction, WORLD_UP);
@@ -2628,7 +2764,7 @@ function createShotDirection(baseDirection, profile, projectileIndex = 0) {
       right.normalize();
     }
     const up = new THREE.Vector3().crossVectors(right, direction).normalize();
-    const spread = profile.spread * randomRange(0.3, 1.15) * (1 + speedPressure * 0.18);
+    const spread = profile.spread * randomRange(0.3, 1.15) * movementSpread;
     const angle = randomRange(0, Math.PI * 2);
     const horizontal = Math.cos(angle) * spread + randomRange(-profile.spread * 0.18, profile.spread * 0.18);
     const vertical = Math.sin(angle) * spread * 0.72 + randomRange(-profile.spread * 0.16, profile.spread * 0.16);
@@ -2636,7 +2772,7 @@ function createShotDirection(baseDirection, profile, projectileIndex = 0) {
     direction.addScaledVector(up, vertical);
     return direction.normalize();
   }
-  const spread = profile.spread * (projectileIndex === 0 ? 0.34 : 0.82) * (1 + speedPressure * 0.22);
+  const spread = profile.spread * (projectileIndex === 0 ? 0.34 : 0.82) * movementSpread;
   const direction = baseDirection.clone();
   direction.x += randomRange(-spread, spread);
   direction.y += randomRange(-spread * 0.55, spread * 0.55);
@@ -2756,10 +2892,12 @@ function findForgivingAimHit(origin, direction, profile) {
 
 function findAimCandidate(origin, direction, profile, projectileIndex = 0) {
   const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
+  const airPressure = state.grounded ? 0 : 1;
   const chainPressure = THREE.MathUtils.clamp(state.bhopChain / BHOP_CHAIN_MAX, 0, 1);
   const projectileScale = projectileIndex === 0 ? 1 : 0.55;
-  const cone = (profile.aimAssist + speedPressure * 0.004 + chainPressure * 0.002) * projectileScale;
-  const extraRadius = (profile.hitRadius + speedPressure * 0.045 + chainPressure * 0.025) * projectileScale;
+  const movementPenalty = THREE.MathUtils.clamp(1 - airPressure * 0.22 - state.recoil * 0.08, 0.62, 1);
+  const cone = (profile.aimAssist + speedPressure * 0.004 + chainPressure * 0.002) * projectileScale * movementPenalty;
+  const extraRadius = (profile.hitRadius + speedPressure * 0.035 + chainPressure * 0.022) * projectileScale * movementPenalty;
   let best = null;
 
   for (const target of targets) {
@@ -2889,7 +3027,7 @@ function reportPlayerHit(remote, hit, origin, direction, profile = null) {
   remote.pendingHit = performance.now();
   state.stamina = Math.min(100, state.stamina + 8 + (profile?.damage ?? 1) * 3);
   spawnRingBurst(hit.point, materials.targetBody);
-  showToast(`Hit ${remote.name}${profile?.damage > 1 ? ` x${profile.damage}` : ""}`);
+  showPulseMarker("hit");
   audio.hit();
   sendNetwork({
     type: "player_hit",
@@ -3170,10 +3308,31 @@ function getWeaponCollisionPull() {
   return THREE.MathUtils.clamp((WEAPON_CLIP_DISTANCE - nearest) / WEAPON_CLIP_DISTANCE, 0, 1);
 }
 
-function showPulseMarker() {
-  hud.pulseMarker.classList.remove("active");
+function showPulseMarker(type = "hit") {
+  if (!hud.pulseMarker) {
+    return;
+  }
+  hud.pulseMarker.classList.remove("active", "hit", "kill", "damage");
+  hud.pulseMarker.classList.add(type);
   void hud.pulseMarker.offsetWidth;
   hud.pulseMarker.classList.add("active");
+}
+
+function addCombatFeed(text, type = "hit") {
+  if (!hud.combatFeed || !text) {
+    return;
+  }
+  const item = document.createElement("div");
+  item.className = `combat-feed-item ${type}`;
+  item.textContent = text;
+  hud.combatFeed.prepend(item);
+  while (hud.combatFeed.children.length > 5) {
+    hud.combatFeed.lastElementChild?.remove();
+  }
+  setTimeout(() => {
+    item.classList.add("leaving");
+    setTimeout(() => item.remove(), 180);
+  }, 3600);
 }
 
 function showToast(text) {
@@ -3196,7 +3355,42 @@ function updateHud() {
   hud.pulseBar.style.transform = `scaleX(${THREE.MathUtils.clamp(state.bhopChain / 12, 0, 1)})`;
   hud.pulseValue.textContent = `${state.bhopChain}x`;
   hud.speedValue.textContent = String(speed);
+  updateWeaponHud();
   updateCrosshair(speed);
+}
+
+function updateWeaponHud() {
+  const profile = getSelectedWeaponProfile();
+  const weaponState = getWeaponRuntimeState(profile);
+  const reloadDuration = weaponState.reloadDuration || profile.reloadTime;
+  const reloadRatio = weaponState.reloadTimer > 0
+    ? 1 - THREE.MathUtils.clamp(weaponState.reloadTimer / reloadDuration, 0, 1)
+    : 1;
+  const cooldownRatio = profile.interval > 0
+    ? 1 - THREE.MathUtils.clamp(state.fireTimer / profile.interval, 0, 1)
+    : 1;
+  const ready = weaponState.reloadTimer <= 0 && state.fireTimer <= 0 && weaponState.ammo > 0;
+
+  if (hud.weaponPanel) {
+    hud.weaponPanel.dataset.state = weaponState.reloadTimer > 0 ? "reloading" : ready ? "ready" : "cooldown";
+  }
+  if (hud.weaponSlotLabel) {
+    hud.weaponSlotLabel.textContent = String(state.weaponSlot + 1);
+  }
+  if (hud.weaponNameValue) {
+    hud.weaponNameValue.textContent = profile.name;
+  }
+  if (hud.weaponAmmoValue) {
+    hud.weaponAmmoValue.textContent = `${weaponState.ammo}/${profile.magazine}`;
+  }
+  if (hud.weaponStateValue) {
+    hud.weaponStateValue.textContent = weaponState.reloadTimer > 0
+      ? "RELOAD"
+      : ready ? "READY" : "COOLDOWN";
+  }
+  if (hud.weaponReloadBar) {
+    hud.weaponReloadBar.style.transform = `scaleX(${(weaponState.reloadTimer > 0 ? reloadRatio : cooldownRatio).toFixed(3)})`;
+  }
 }
 
 function updateCrosshair(speed) {
@@ -3204,14 +3398,41 @@ function updateCrosshair(speed) {
     return;
   }
   const profile = getSelectedWeaponProfile();
+  const weaponState = getWeaponRuntimeState(profile);
   const speedPressure = THREE.MathUtils.clamp(speed / 180, 0, 1);
-  const gap = THREE.MathUtils.clamp(7.5 + speedPressure * 5.5 + state.recoil * 5 + profile.spread * 820, 7, 18);
-  const length = THREE.MathUtils.clamp(9.5 + profile.hitRadius * 12 - profile.spread * 240, 8, 14);
+  const airPressure = state.grounded ? 0 : 1;
+  const reloadPressure = weaponState.reloadTimer > 0 ? 1 : 0;
+  const styleGap = {
+    shotgun: 18,
+    sniper: 5.5,
+    ray: 7,
+    lightning: 11,
+    "hand-cannon": 9,
+    sidearm: 8
+  }[profile.style] ?? 9;
+  const styleLength = {
+    shotgun: 7,
+    sniper: 16,
+    ray: 12,
+    lightning: 9,
+    "hand-cannon": 10,
+    sidearm: 9.5
+  }[profile.style] ?? 11;
+  const gap = THREE.MathUtils.clamp(
+    styleGap + speedPressure * 6.5 + airPressure * 3.4 + state.recoil * 7 + profile.spread * 120,
+    profile.style === "sniper" ? 4.5 : 7,
+    profile.style === "shotgun" ? 34 : 22
+  );
+  const length = THREE.MathUtils.clamp(styleLength + profile.hitRadius * 9 - profile.spread * 60, 6, 18);
+  const ring = THREE.MathUtils.clamp(gap * (profile.style === "shotgun" ? 3.2 : 2.4), 34, 112);
   const color = `#${profile.tracerColor.toString(16).padStart(6, "0")}`;
+  hud.crosshair.dataset.style = profile.style;
+  hud.crosshair.classList.toggle("reloading", reloadPressure > 0);
   hud.crosshair.style.setProperty("--aim-gap", `${gap.toFixed(1)}px`);
   hud.crosshair.style.setProperty("--aim-length", `${length.toFixed(1)}px`);
+  hud.crosshair.style.setProperty("--aim-ring", `${ring.toFixed(1)}px`);
   hud.crosshair.style.setProperty("--aim-color", color);
-  hud.crosshair.style.setProperty("--aim-opacity", state.firing ? "1" : "0.94");
+  hud.crosshair.style.setProperty("--aim-opacity", reloadPressure > 0 ? "0.42" : state.firing ? "1" : "0.94");
 }
 
 function updateLocalSnapshot() {
@@ -3569,9 +3790,12 @@ function handlePlayerDamaged(message) {
   const damage = Number.isFinite(Number(message.damage)) ? Number(message.damage) : null;
   const damageText = damage ? ` -${damage}` : "";
   if (message.victim_id === network.clientId) {
+    showPulseMarker("damage");
+    addCombatFeed(`${message.attacker_name ?? "Player"}${damageText}`, "damage");
     showToast(`Hit${damageText} - HP ${message.health}/${message.max_health}`);
   } else if (message.attacker_id === network.clientId) {
-    showToast(`Hit ${message.victim_name ?? "Player"}${damageText} - HP ${message.health}/${message.max_health}`);
+    showPulseMarker("hit");
+    addCombatFeed(`Hit ${message.victim_name ?? "Player"}${damageText}`, "hit");
     audio.hit();
   }
 
@@ -3585,6 +3809,8 @@ function handlePlayerDamaged(message) {
 function handlePlayerKilled(message) {
   if (message.victim_id === network.clientId) {
     setLocalAlive(false);
+    showPulseMarker("damage");
+    addCombatFeed(`${message.killer_name ?? "Player"} eliminated you`, "damage");
     showToast(`Killed by ${message.killer_name ?? "Player"} - respawn 1s`);
   } else {
     const victim = remotePlayers.get(message.victim_id);
@@ -3593,8 +3819,12 @@ function handlePlayerKilled(message) {
       victim.group.visible = false;
     }
     if (message.killer_id === network.clientId) {
+      showPulseMarker("kill");
+      addCombatFeed(`Eliminated ${message.victim_name ?? "Player"}`, "kill");
       showToast(`Kill +1: ${message.victim_name ?? "Player"}`);
       audio.finish();
+    } else {
+      addCombatFeed(`${message.killer_name ?? "Player"} eliminated ${message.victim_name ?? "Player"}`, "kill");
     }
   }
 
@@ -3656,6 +3886,7 @@ function respawnLocalPlayer(remoteState = null) {
   state.stamina = 100;
   state.fireTimer = 0;
   state.weaponSwitchTimer = 0;
+  resetWeaponInventory();
   state.recoil = 0;
   state.firing = false;
   state.alive = true;
@@ -4689,6 +4920,14 @@ function createAudioSystem() {
   return {
     resume: ensure,
     shoot: weaponShot,
+    reload(profile = {}) {
+      const base = profile.style === "sniper" ? 92 : profile.style === "shotgun" ? 118 : 180;
+      tone(base, 0.045, "triangle", 0.08, 1.35);
+      tone(base * 1.8, 0.04, "sine", 0.05, 0.72, 0.12);
+    },
+    reloadReady() {
+      tone(520, 0.035, "triangle", 0.06, 1.16);
+    },
     hit() {
       tone(620, 0.055, "triangle", 0.16, 1.28);
     },

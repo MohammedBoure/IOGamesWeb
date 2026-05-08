@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -14,15 +15,16 @@ from starlette.websockets import WebSocket, WebSocketState
 JsonDict = dict[str, Any]
 logger = logging.getLogger("neon_aim.match_manager")
 
-WEAPON_DAMAGE: dict[str, int] = {
-    "pistol": 3,
-    "long-pistol": 2,
-    "long-pistol-small": 3,
-    "rifle": 1,
-    "sniper-rifle": 5,
-    "ray-gun": 1,
-    "lightning-gun": 1,
+WEAPON_RULES: dict[str, JsonDict] = {
+    "pistol": {"damage": 3, "interval": 0.15, "range": 64, "magazine": 8, "reload": 0.9},
+    "long-pistol": {"damage": 2, "interval": 0.3, "range": 82, "magazine": 5, "reload": 1.15},
+    "long-pistol-small": {"damage": 3, "interval": 0.72, "range": 26, "magazine": 3, "reload": 1.35},
+    "rifle": {"damage": 1, "interval": 0.14, "range": 82, "magazine": 28, "reload": 1.35},
+    "sniper-rifle": {"damage": 5, "interval": 0.58, "range": 132, "magazine": 1, "reload": 1.55},
+    "ray-gun": {"damage": 1, "interval": 0.145, "range": 72, "magazine": 24, "reload": 1.1},
+    "lightning-gun": {"damage": 1, "interval": 0.17, "range": 44, "magazine": 14, "reload": 1.25},
 }
+DEFAULT_WEAPON_RULE: JsonDict = {"damage": 1, "interval": 0.12, "range": 95, "magazine": 18, "reload": 1.2}
 
 
 class ClientMessageError(Exception):
@@ -46,6 +48,10 @@ class Player:
     max_health: int = 5
     last_spawn_index: int | None = None
     state: JsonDict = field(default_factory=dict)
+    last_action_at: dict[str, float] = field(default_factory=dict)
+    last_hit_at: dict[str, float] = field(default_factory=dict)
+    weapon_ammo: dict[str, int] = field(default_factory=dict)
+    weapon_reload_until: dict[str, float] = field(default_factory=dict)
     connected_at: str = field(default_factory=lambda: utc_now())
     last_seen: str = field(default_factory=lambda: utc_now())
 
@@ -322,7 +328,11 @@ class MatchManager:
 
             match = self._matches[attacker.match_id]
             weapon = sanitize_weapon_id(payload.get("weapon"))
-            damage = resolve_weapon_damage(payload)
+            rule = resolve_weapon_rule(weapon)
+            validate_recent_shot(attacker, weapon, rule)
+            enforce_hit_cooldown(attacker, target_id, weapon, rule)
+            validate_hit_range(attacker, victim, payload, rule)
+            damage = resolve_weapon_damage(rule)
             victim.health = max(0, victim.health - damage)
             victim.last_seen = utc_now()
             match_state = self._public_match_state_locked(match.id)
@@ -412,11 +422,15 @@ class MatchManager:
             match = self._matches[player.match_id]
             recipients = set(match.players) - {player_id}
             action_type = str(payload.get("action", payload.get("type", "player_action")))[:32]
+            clean_payload = clean_action_payload(payload.get("payload", payload))
+            if action_type == "shoot":
+                weapon = sanitize_weapon_id(clean_payload.get("weapon"))
+                consume_weapon_shot(player, weapon, resolve_weapon_rule(weapon))
             message = {
                 "type": "player_action",
                 "player_id": player_id,
                 "action": action_type,
-                "payload": clean_action_payload(payload.get("payload", payload)),
+                "payload": clean_payload,
                 "server_time": utc_now(),
             }
 
@@ -434,6 +448,7 @@ class MatchManager:
             player.alive = True
             player.health = player.max_health
             player.state.update(spawn_state(player))
+            reset_weapon_state(player)
             player.last_seen = utc_now()
             match_state = self._public_match_state_locked(match_id)
             recipients = set(match.players)
@@ -475,6 +490,7 @@ class MatchManager:
         player.ready = False
         player.alive = True
         player.health = player.max_health
+        reset_weapon_state(player)
 
         if not match:
             return events
@@ -621,6 +637,14 @@ def reset_combat_player(player: Player) -> None:
     player.health = player.max_health
     player.ready = False
     player.state.update(spawn_state(player))
+    reset_weapon_state(player)
+
+
+def reset_weapon_state(player: Player) -> None:
+    player.last_action_at.clear()
+    player.last_hit_at.clear()
+    player.weapon_ammo.clear()
+    player.weapon_reload_until.clear()
 
 
 def spawn_state(player: Player) -> JsonDict:
@@ -677,11 +701,87 @@ def sanitize_weapon_id(value: Any) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "", value)[:32]
 
 
-def resolve_weapon_damage(payload: JsonDict) -> int:
-    weapon = sanitize_weapon_id(payload.get("weapon"))
-    if weapon in WEAPON_DAMAGE:
-        return WEAPON_DAMAGE[weapon]
-    return clamp_int(payload.get("damage", 1), 1, 3)
+def resolve_weapon_rule(weapon: str) -> JsonDict:
+    return WEAPON_RULES.get(weapon, DEFAULT_WEAPON_RULE)
+
+
+def resolve_weapon_damage(rule: JsonDict) -> int:
+    return clamp_int(rule.get("damage", 1), 1, 5)
+
+
+def enforce_hit_cooldown(attacker: Player, target_id: str, weapon: str, rule: JsonDict) -> None:
+    cooldown_key = f"{weapon or 'unknown'}:{target_id}"
+    minimum_interval = max(0.045, float(rule.get("interval", 0.12)) * 0.72)
+    now = time.monotonic()
+    last_hit_at = attacker.last_hit_at.get(cooldown_key, 0)
+    if now - last_hit_at < minimum_interval:
+        raise ClientMessageError("hit_rate_limited", "Weapon is cooling down.")
+    attacker.last_hit_at[cooldown_key] = now
+
+
+def consume_weapon_shot(player: Player, weapon: str, rule: JsonDict) -> None:
+    cooldown_key = weapon or "unknown"
+    minimum_interval = max(0.045, float(rule.get("interval", 0.12)) * 0.72)
+    now = time.monotonic()
+    last_action_at = player.last_action_at.get(cooldown_key, 0)
+    if now - last_action_at < minimum_interval:
+        raise ClientMessageError("action_rate_limited", "Weapon action is cooling down.")
+
+    magazine = clamp_int(rule.get("magazine", 18), 1, 60)
+    reload_duration = max(0.35, float(rule.get("reload", 1.2)))
+    reload_until = player.weapon_reload_until.get(cooldown_key, 0)
+    if reload_until > now:
+        raise ClientMessageError("weapon_reloading", "Weapon is reloading.")
+
+    ammo = player.weapon_ammo.get(cooldown_key, magazine)
+    if reload_until and reload_until <= now and ammo <= 0:
+        ammo = magazine
+        player.weapon_reload_until.pop(cooldown_key, None)
+
+    if ammo <= 0:
+        player.weapon_ammo[cooldown_key] = 0
+        player.weapon_reload_until[cooldown_key] = now + reload_duration
+        raise ClientMessageError("weapon_reloading", "Weapon is reloading.")
+
+    ammo -= 1
+    player.weapon_ammo[cooldown_key] = ammo
+    if ammo <= 0:
+        player.weapon_reload_until[cooldown_key] = now + reload_duration
+    player.last_action_at[cooldown_key] = now
+
+
+def validate_recent_shot(player: Player, weapon: str, rule: JsonDict) -> None:
+    cooldown_key = weapon or "unknown"
+    last_action_at = player.last_action_at.get(cooldown_key, 0)
+    allowed_delay = max(1.2, float(rule.get("interval", 0.12)) + 0.85)
+    if not last_action_at or time.monotonic() - last_action_at > allowed_delay:
+        raise ClientMessageError("missing_shot_action", "Hit must follow a recent shot.")
+
+
+def validate_hit_range(attacker: Player, victim: Player, payload: JsonDict, rule: JsonDict) -> None:
+    hit = payload.get("hit") if isinstance(payload.get("hit"), dict) else {}
+    origin = vector3_from(hit.get("origin")) or vector3_from(attacker.state.get("position"))
+    victim_position = vector3_from(victim.state.get("position"))
+    hit_point = vector3_from(hit.get("point"))
+    if not origin:
+        return
+
+    max_range = float(rule.get("range", 95))
+    allowed_range = max_range + max(7.5, max_range * 0.12)
+    if hit_point and distance3(origin, hit_point) > allowed_range:
+        raise ClientMessageError("hit_out_of_range", "Hit point is outside weapon range.")
+    if victim_position and distance3(origin, victim_position) > allowed_range:
+        raise ClientMessageError("target_out_of_range", "Target is outside weapon range.")
+
+
+def vector3_from(value: Any) -> tuple[float, float, float] | None:
+    if not isinstance(value, list) or len(value) != 3 or not all(is_number(item) for item in value):
+        return None
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def distance3(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
 
 
 def sanitize_name(value: str) -> str:
