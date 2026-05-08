@@ -148,6 +148,7 @@ player.add(pitch);
 scene.add(player);
 
 const materials = createMaterials();
+const shooterWorld = new THREE.Group();
 const colliders = [];
 const targets = [];
 const effects = [];
@@ -281,6 +282,8 @@ return {
 };
 
 function setupWorld() {
+  scene.add(shooterWorld);
+
   const hemi = new THREE.HemisphereLight(0xffffff, 0xcad7cf, 1.55);
   scene.add(hemi);
 
@@ -296,11 +299,12 @@ function setupWorld() {
   sun.shadow.camera.far = 150;
   scene.add(sun);
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA + 10, ARENA + 10), materials.floor);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA + 18, ARENA + 18), materials.floor);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
-  scene.add(floor);
+  shooterWorld.add(floor);
 
+  addShooterGroundLayout();
   addArenaShell();
   addMovementGeometry();
   addTargetLanes();
@@ -311,6 +315,7 @@ function setupWorld() {
 function setupRacingWorld() {
   race.world.visible = false;
   scene.add(race.world);
+  addRacingTerrain();
 
   const trackPieces = [
     [0, RACE_TRACK.centerZ, RACE_TRACK.horizontalLength, RACE_TRACK.roadWidth],
@@ -385,6 +390,21 @@ function setupRacingWorld() {
   race.car = createRaceCar();
   race.world.add(race.car);
   addRacingWorldProps();
+}
+
+function addRacingTerrain() {
+  const ground = new THREE.Mesh(new THREE.BoxGeometry(168, 0.08, 146), materials.field);
+  ground.position.y = -0.04;
+  ground.receiveShadow = true;
+  race.world.add(ground);
+
+  addGroundPatch(race.world, 0, RACE_TRACK.centerZ, 132, 20, 0, materials.raceShoulder, 0.012);
+  addGroundPatch(race.world, 0, -RACE_TRACK.centerZ, 132, 20, 0, materials.raceShoulder, 0.012);
+  addGroundPatch(race.world, RACE_TRACK.centerX, 0, 20, 112, 0, materials.raceShoulder, 0.012);
+  addGroundPatch(race.world, -RACE_TRACK.centerX, 0, 20, 112, 0, materials.raceShoulder, 0.012);
+  addGroundPatch(race.world, 0, 0, 78, 58, 0, materials.meadowDark, 0.018);
+  addGroundPatch(race.world, -58, 58, 30, 18, 0.22, materials.dirt, 0.018);
+  addGroundPatch(race.world, 58, -58, 30, 18, -0.22, materials.dirt, 0.018);
 }
 
 function addRaceBank(x, z, width, depth, axis, tilt) {
@@ -462,33 +482,58 @@ function createMaterials() {
   const floorTexture = createFloorTexture();
   floorTexture.wrapS = THREE.RepeatWrapping;
   floorTexture.wrapT = THREE.RepeatWrapping;
-  floorTexture.repeat.set(12, 12);
+  floorTexture.repeat.set(4, 4);
   floorTexture.colorSpace = THREE.SRGBColorSpace;
 
   return {
     floor: new THREE.MeshStandardMaterial({
-      color: 0xd7e0dc,
-      roughness: 0.72,
+      color: 0xffffff,
+      roughness: 0.86,
       metalness: 0.02,
       map: floorTexture
     }),
     wall: new THREE.MeshStandardMaterial({
-      color: 0xc6d3d4,
-      roughness: 0.62,
+      color: 0x87987c,
+      roughness: 0.82,
       metalness: 0.04
     }),
     platform: new THREE.MeshStandardMaterial({
-      color: 0xeff5ef,
-      roughness: 0.56,
+      color: 0xb98a58,
+      roughness: 0.7,
       metalness: 0.03
     }),
     platformDark: new THREE.MeshStandardMaterial({
-      color: 0x9aa8a5,
-      roughness: 0.6,
+      color: 0x6f5842,
+      roughness: 0.76,
       metalness: 0.05
     }),
+    dirt: new THREE.MeshStandardMaterial({
+      color: 0x8c6b47,
+      roughness: 0.92,
+      metalness: 0.01
+    }),
+    packedDirt: new THREE.MeshStandardMaterial({
+      color: 0xa8845c,
+      roughness: 0.88,
+      metalness: 0.01
+    }),
+    field: new THREE.MeshStandardMaterial({
+      color: 0x9fb981,
+      roughness: 0.9,
+      metalness: 0.01
+    }),
+    meadowDark: new THREE.MeshStandardMaterial({
+      color: 0x789a62,
+      roughness: 0.92,
+      metalness: 0.01
+    }),
+    raceShoulder: new THREE.MeshStandardMaterial({
+      color: 0x69715f,
+      roughness: 0.88,
+      metalness: 0.02
+    }),
     raceTrack: new THREE.MeshStandardMaterial({
-      color: 0x2f3f43,
+      color: 0x303a3b,
       roughness: 0.7,
       metalness: 0.03
     }),
@@ -562,42 +607,44 @@ function createMaterials() {
 }
 
 function addArenaShell() {
-  const height = 3.4;
-  const depth = 1.1;
+  const height = 1.35;
+  const depth = 1.25;
   addBox(0, height / 2, -HALF_ARENA, ARENA + depth, height, depth, materials.wall, true);
   addBox(0, height / 2, HALF_ARENA, ARENA + depth, height, depth, materials.wall, true);
   addBox(HALF_ARENA, height / 2, 0, depth, height, ARENA + depth, materials.wall, true);
   addBox(-HALF_ARENA, height / 2, 0, depth, height, ARENA + depth, materials.wall, true);
+}
 
-  const laneMaterial = materials.accentBlue;
-  for (let z = -24; z <= 24; z += 12) {
-    const line = new THREE.Mesh(new THREE.BoxGeometry(ARENA - 6, 0.035, 0.08), laneMaterial);
-    line.position.set(0, 0.04, z);
-    scene.add(line);
-  }
-  for (let x = -24; x <= 24; x += 12) {
-    const line = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.035, ARENA - 6), materials.accentGreen);
-    line.position.set(x, 0.045, 0);
-    scene.add(line);
-  }
+function addShooterGroundLayout() {
+  addGroundPatch(shooterWorld, 0, 0, 46, 34, 0, materials.packedDirt, 0.012);
+  addGroundPatch(shooterWorld, -38, -44, 30, 22, 0.45, materials.dirt, 0.014);
+  addGroundPatch(shooterWorld, -38, 43, 30, 21, -0.35, materials.dirt, 0.014);
+  addGroundPatch(shooterWorld, 45, -43, 26, 21, -0.18, materials.dirt, 0.014);
+  addGroundPatch(shooterWorld, 45, 43, 26, 21, 0.22, materials.dirt, 0.014);
+  addGroundPatch(shooterWorld, 0, -36, 15, 70, 0, materials.dirt, 0.016);
+  addGroundPatch(shooterWorld, -34, 0, 58, 11, -0.08, materials.dirt, 0.016);
+  addGroundPatch(shooterWorld, 34, 0, 58, 11, 0.08, materials.dirt, 0.016);
+  addGroundPatch(shooterWorld, -55, 0, 20, 96, 0, materials.field, 0.006);
+  addGroundPatch(shooterWorld, 55, 0, 20, 96, 0, materials.field, 0.006);
 }
 
 function addMovementGeometry() {
   const blocks = [
-    [-16, -12, 6, 2.5, 1.6, 0.12],
-    [15, -13, 5.5, 2.7, 1.75, -0.28],
-    [-9, 5, 4.5, 2.6, 1.8, 0.42],
-    [10, 7, 6.4, 2.2, 1.55, -0.54],
-    [0, -1, 4.2, 4.2, 1.35, 0.15],
-    [-21, 13, 4.2, 2.2, 1.7, -0.16],
-    [20, 15, 4.8, 2.6, 1.5, 0.38]
+    [-18, -10, 7.2, 2.6, 1.35, 0.08],
+    [18, -10, 7.2, 2.6, 1.35, -0.08],
+    [-18, 10, 7.2, 2.6, 1.35, -0.08],
+    [18, 10, 7.2, 2.6, 1.35, 0.08],
+    [0, -15, 5.4, 3.1, 1.55, 0],
+    [0, 15, 5.4, 3.1, 1.55, 0],
+    [-7, 0, 3.2, 5.4, 1.15, 0.2],
+    [7, 0, 3.2, 5.4, 1.15, -0.2]
   ];
 
   for (const [x, z, w, d, h, r] of blocks) {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
     group.rotation.y = r;
-    scene.add(group);
+    shooterWorld.add(group);
 
     const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materials.platform);
     body.position.y = h / 2;
@@ -605,9 +652,26 @@ function addMovementGeometry() {
     body.receiveShadow = true;
     group.add(body);
 
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(w * 0.82, 0.06, 0.08), chooseAccent(x, z));
-    edge.position.set(0, h + 0.06, d / 2 + 0.04);
-    group.add(edge);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.18, 0.08, d + 0.18), materials.platformDark);
+    cap.position.y = h + 0.04;
+    cap.castShadow = true;
+    group.add(cap);
+
+    for (const side of [-1, 1]) {
+      const frontRail = new THREE.Mesh(new THREE.BoxGeometry(w * 0.86, 0.055, 0.08), materials.platformDark);
+      frontRail.position.set(0, h * 0.45, side * (d / 2 + 0.045));
+      group.add(frontRail);
+
+      const lowerRail = new THREE.Mesh(new THREE.BoxGeometry(w * 0.72, 0.045, 0.07), materials.platformDark);
+      lowerRail.position.set(0, h * 0.18, side * (d / 2 + 0.047));
+      group.add(lowerRail);
+    }
+
+    for (const side of [-1, 1]) {
+      const sideRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.052, d * 0.8), materials.platformDark);
+      sideRail.position.set(side * (w / 2 + 0.045), h * 0.52, 0);
+      group.add(sideRail);
+    }
 
     colliders.push(makeRotatedCollider(group.position, w, d, r));
   }
@@ -641,7 +705,7 @@ function addTargetLanes() {
 function createTarget(index, anchor) {
   const group = new THREE.Group();
   group.position.copy(anchor);
-  scene.add(group);
+  shooterWorld.add(group);
 
   const radius = index % 3 === 0 ? 0.36 : index % 3 === 1 ? 0.44 : 0.52;
   const bodyMaterial = materials.targetBody.clone();
@@ -692,35 +756,46 @@ function addAmbientMarkers() {
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, 3.4, 10), materials.platformDark);
     tower.position.set(x, 1.7, z);
     tower.castShadow = true;
-    scene.add(tower);
+    shooterWorld.add(tower);
 
     const marker = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.08), material);
     marker.position.set(x, 3.45, z);
-    scene.add(marker);
+    shooterWorld.add(marker);
   }
 }
 
 function addShooterWorldProps() {
   const placements = [
-    { id: "barn", x: -53, z: -47, rotation: 0.45, scale: 1.18, collider: [9.2, 9.8] },
-    { id: "open-barn", x: -52, z: 43, rotation: -0.4, scale: 1.12, collider: [7.2, 7.8] },
-    { id: "silo", x: 55, z: -48, rotation: -0.18, scale: 1.08, collider: [4.4, 4.4] },
-    { id: "water-tower", x: 53, z: 46, rotation: 0.22, scale: 1.08, collider: [3.4, 3.4] },
-    { id: "well", x: 35, z: 18, rotation: 0.72, scale: 1.55, collider: [2.4, 2.4] },
-    { id: "common-tree-1", x: -64, z: -16, rotation: 0.2, scale: 2.5, collider: [2.4, 2.4] },
-    { id: "pine-tree-1", x: 64, z: -14, rotation: -0.4, scale: 2.4, collider: [2.1, 2.1] },
-    { id: "cactus-1", x: 42, z: -31, rotation: 0.9, scale: 2.3, collider: [1.3, 1.3] },
-    { id: "bush-1", x: -34, z: 28, rotation: -0.35, scale: 1.8 },
-    { id: "rock-1", x: -31, z: -6, rotation: 0.55, scale: 3.1, collider: [1.6, 1.5] },
-    { id: "rock-moss-1", x: 31, z: -25, rotation: -0.2, scale: 3.0, collider: [1.6, 1.5] },
-    { id: "wood-log", x: -36, z: 3, rotation: 1.08, scale: 2.0, collider: [1.3, 4.9] },
-    { id: "tree-stump", x: 33, z: -2, rotation: -0.65, scale: 2.2, collider: [2.5, 2.0] },
-    { id: "grass", x: -12, z: 31, rotation: 0.1, scale: 1.35 },
-    { id: "plant-1", x: 12, z: 31, rotation: -0.1, scale: 1.45 }
+    { id: "barn", x: -46, z: -44, rotation: 0.42, scale: 1.22, collider: [9.4, 10] },
+    { id: "open-barn", x: -47, z: 42, rotation: -0.36, scale: 1.12, collider: [7.4, 7.8] },
+    { id: "silo", x: 48, z: -43, rotation: -0.18, scale: 1.08, collider: [4.4, 4.4] },
+    { id: "water-tower", x: 49, z: 42, rotation: 0.22, scale: 1.06, collider: [3.4, 3.4] },
+    { id: "well", x: 28, z: 16, rotation: 0.72, scale: 1.45, collider: [2.3, 2.3] },
+    { id: "fence", x: -33, z: -57, rotation: 0.08, scale: 1.4 },
+    { id: "fence", x: -22, z: -56, rotation: 0.08, scale: 1.4 },
+    { id: "fence-2", x: -35, z: 56, rotation: -0.1, scale: 1.4 },
+    { id: "fence-2", x: -24, z: 55, rotation: -0.1, scale: 1.4 },
+    { id: "fence", x: 37, z: -56, rotation: -0.1, scale: 1.4 },
+    { id: "fence-2", x: 38, z: 55, rotation: 0.1, scale: 1.4 },
+    { id: "common-tree-1", x: -66, z: -24, rotation: 0.2, scale: 2.7, collider: [2.4, 2.4] },
+    { id: "common-tree-1", x: -64, z: 22, rotation: -0.18, scale: 2.35, collider: [2.1, 2.1] },
+    { id: "pine-tree-1", x: 64, z: -22, rotation: -0.4, scale: 2.6, collider: [2.1, 2.1] },
+    { id: "pine-tree-1", x: 65, z: 22, rotation: 0.36, scale: 2.25, collider: [2, 2] },
+    { id: "cactus-1", x: 41, z: -25, rotation: 0.9, scale: 2.15, collider: [1.3, 1.3] },
+    { id: "bush-1", x: -31, z: 28, rotation: -0.35, scale: 1.65 },
+    { id: "bush-1", x: 31, z: 29, rotation: 0.38, scale: 1.55 },
+    { id: "rock-1", x: -30, z: -6, rotation: 0.55, scale: 3.0, collider: [1.6, 1.5] },
+    { id: "rock-moss-1", x: 30, z: -25, rotation: -0.2, scale: 2.9, collider: [1.6, 1.5] },
+    { id: "wood-log", x: -33, z: 4, rotation: 1.08, scale: 1.9, collider: [1.3, 4.7] },
+    { id: "tree-stump", x: 31, z: -2, rotation: -0.65, scale: 2.05, collider: [2.4, 1.9] },
+    { id: "grass", x: -12, z: 30, rotation: 0.1, scale: 1.35 },
+    { id: "grass", x: 8, z: -30, rotation: -0.18, scale: 1.2 },
+    { id: "plant-1", x: 12, z: 30, rotation: -0.1, scale: 1.45 },
+    { id: "plant-1", x: -8, z: -31, rotation: 0.25, scale: 1.25 }
   ];
 
   for (const placement of placements) {
-    addWorldProp(scene, placement);
+    addWorldProp(shooterWorld, placement);
     if (placement.collider) {
       colliders.push(makeRotatedCollider(
         new THREE.Vector3(placement.x, 0, placement.z),
@@ -734,25 +809,31 @@ function addShooterWorldProps() {
 
 function addRacingWorldProps() {
   const placements = [
-    { id: "windmill", x: -74, z: 60, rotation: 0.34, scale: 1.35 },
-    { id: "barn", x: 72, z: 60, rotation: -0.55, scale: 1.2 },
-    { id: "open-barn", x: -76, z: -62, rotation: 0.62, scale: 1.12 },
-    { id: "silo", x: 74, z: -62, rotation: -0.2, scale: 1.08 },
-    { id: "water-tower", x: 13, z: -69, rotation: 0.3, scale: 1.08 },
-    { id: "well", x: -18, z: 6, rotation: -0.5, scale: 1.2 },
-    { id: "fence", x: -20, z: 63, rotation: 0, scale: 1.55 },
-    { id: "fence", x: -8, z: 63, rotation: 0, scale: 1.55 },
-    { id: "fence-2", x: 20, z: -63, rotation: Math.PI, scale: 1.55 },
-    { id: "fence-2", x: 8, z: -63, rotation: Math.PI, scale: 1.55 },
-    { id: "common-tree-1", x: -71, z: 22, rotation: 0.1, scale: 2.8 },
-    { id: "pine-tree-1", x: 72, z: 18, rotation: -0.25, scale: 2.7 },
+    { id: "windmill", x: -73, z: 58, rotation: 0.34, scale: 1.35 },
+    { id: "barn", x: 73, z: 58, rotation: -0.55, scale: 1.2 },
+    { id: "open-barn", x: -74, z: -58, rotation: 0.62, scale: 1.12 },
+    { id: "silo", x: 74, z: -58, rotation: -0.2, scale: 1.08 },
+    { id: "water-tower", x: 31, z: -68, rotation: 0.3, scale: 1.05 },
+    { id: "well", x: -22, z: 4, rotation: -0.5, scale: 1.2 },
+    { id: "fence", x: -36, z: 64, rotation: 0, scale: 1.5 },
+    { id: "fence", x: -25, z: 64, rotation: 0, scale: 1.5 },
+    { id: "fence", x: -14, z: 64, rotation: 0, scale: 1.5 },
+    { id: "fence-2", x: 14, z: -64, rotation: Math.PI, scale: 1.5 },
+    { id: "fence-2", x: 25, z: -64, rotation: Math.PI, scale: 1.5 },
+    { id: "fence-2", x: 36, z: -64, rotation: Math.PI, scale: 1.5 },
+    { id: "common-tree-1", x: -72, z: 22, rotation: 0.1, scale: 2.7 },
+    { id: "common-tree-1", x: -72, z: 34, rotation: -0.18, scale: 2.4 },
+    { id: "pine-tree-1", x: 72, z: 18, rotation: -0.25, scale: 2.55 },
+    { id: "pine-tree-1", x: 73, z: 31, rotation: 0.18, scale: 2.35 },
     { id: "palm-tree-1", x: 72, z: -19, rotation: 0.45, scale: 1.8 },
-    { id: "cactus-1", x: -73, z: -20, rotation: -0.6, scale: 2.6 },
-    { id: "rock-moss-1", x: 0, z: 0, rotation: 0.4, scale: 4.8 },
-    { id: "rock-1", x: 10, z: 8, rotation: -0.2, scale: 4.2 },
-    { id: "bush-1", x: -12, z: -8, rotation: 0.2, scale: 2.5 },
-    { id: "grass", x: 0, z: 11, rotation: 0.1, scale: 2.0 },
-    { id: "plant-1", x: -10, z: 10, rotation: -0.4, scale: 2.0 }
+    { id: "palm-tree-1", x: 72, z: -31, rotation: -0.2, scale: 1.65 },
+    { id: "cactus-1", x: -73, z: -20, rotation: -0.6, scale: 2.45 },
+    { id: "cactus-1", x: -73, z: -32, rotation: 0.15, scale: 2.1 },
+    { id: "rock-moss-1", x: 0, z: 0, rotation: 0.4, scale: 4.5 },
+    { id: "rock-1", x: 11, z: 8, rotation: -0.2, scale: 3.7 },
+    { id: "bush-1", x: -12, z: -8, rotation: 0.2, scale: 2.2 },
+    { id: "grass", x: 0, z: 12, rotation: 0.1, scale: 1.8 },
+    { id: "plant-1", x: -10, z: 10, rotation: -0.4, scale: 1.75 }
   ];
 
   for (const placement of placements) {
@@ -827,11 +908,20 @@ function prepareWorldModel(model, scale) {
   model.position.y -= box.min.y;
 }
 
+function addGroundPatch(parent, x, z, width, depth, rotation, material, y = 0.01) {
+  const patch = new THREE.Mesh(new THREE.BoxGeometry(width, 0.025, depth), material);
+  patch.position.set(x, y, z);
+  patch.rotation.y = rotation || 0;
+  patch.receiveShadow = true;
+  parent.add(patch);
+  return patch;
+}
+
 function addRamp(x, z, width, depth, rotation, height) {
   const group = new THREE.Group();
   group.position.set(x, 0, z);
   group.rotation.y = rotation;
-  scene.add(group);
+  shooterWorld.add(group);
 
   const ramp = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), materials.platform);
   ramp.position.y = height / 2;
@@ -846,7 +936,7 @@ function addRamp(x, z, width, depth, rotation, height) {
 function addSpeedPad(x, z, direction) {
   const group = new THREE.Group();
   group.position.set(x, 0.06, z);
-  scene.add(group);
+  shooterWorld.add(group);
 
   const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.25, 0.1, 32), materials.accentGreen);
   pad.castShadow = true;
@@ -882,7 +972,7 @@ function addBox(x, y, z, width, height, depth, material, solid = false) {
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  scene.add(mesh);
+  shooterWorld.add(mesh);
   if (solid) {
     colliders.push(makeRotatedCollider(new THREE.Vector3(x, 0, z), width, depth, 0));
   }
@@ -1428,6 +1518,7 @@ function applyGameMode() {
     hud.startButton.textContent = startCopy.button;
   }
   weapon.group.visible = state.mode === GAME_MODES.SHOOTER;
+  shooterWorld.visible = state.mode === GAME_MODES.SHOOTER;
   race.world.visible = state.mode === GAME_MODES.RACING;
   for (const target of targets) {
     target.group.visible = state.mode === GAME_MODES.SHOOTER && target.alive;
@@ -3596,27 +3687,31 @@ function createFloorTexture() {
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#d7e0dc";
+  ctx.fillStyle = "#94ad75";
   ctx.fillRect(0, 0, 512, 512);
 
-  for (let y = 0; y < 512; y += 64) {
-    for (let x = 0; x < 512; x += 64) {
-      ctx.fillStyle = (x + y) % 128 === 0 ? "#eef4f1" : "#ced9d6";
-      ctx.fillRect(x, y, 64, 64);
-      ctx.strokeStyle = "rgba(38, 105, 132, 0.18)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x + 0.5, y + 0.5, 63, 63);
-    }
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const radius = randomRange(1.5, 6);
+    const hue = Math.random() > 0.54 ? "rgba(103, 135, 78, 0.22)" : "rgba(178, 150, 98, 0.16)";
+    ctx.fillStyle = hue;
+    ctx.beginPath();
+    ctx.ellipse(x, y, radius * randomRange(0.7, 1.8), radius, randomRange(0, Math.PI), 0, Math.PI * 2);
+    ctx.fill();
   }
 
-  ctx.strokeStyle = "rgba(36, 132, 255, 0.38)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(256, 0);
-  ctx.lineTo(256, 512);
-  ctx.moveTo(0, 256);
-  ctx.lineTo(512, 256);
-  ctx.stroke();
+  ctx.strokeStyle = "rgba(76, 94, 59, 0.22)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 36; i++) {
+    const y = Math.random() * 512;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    for (let x = 0; x <= 512; x += 64) {
+      ctx.lineTo(x, y + Math.sin(x * 0.02 + i) * randomRange(2, 7));
+    }
+    ctx.stroke();
+  }
 
   return new THREE.CanvasTexture(canvas);
 }
