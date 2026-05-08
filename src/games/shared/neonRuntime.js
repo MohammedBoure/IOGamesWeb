@@ -2642,60 +2642,71 @@ function resolveWeaponShot(origin, direction, profile, shotContext = null) {
   const nearestDamageDistance = Math.min(nearestTargetDistance, nearestRemoteDistance, nearestForgivingDistance);
 
   if (worldHitDistance !== null && worldHitDistance <= nearestDamageDistance) {
-    spawnTracer(visualOrigin, direction, worldHitDistance, true, profile);
+    spawnShotTracer(visualOrigin, origin, direction, worldHitDistance, true, profile);
     spawnRingBurst(origin.clone().addScaledVector(direction, worldHitDistance), materials.platformDark);
     return { blocked: true, hit: false };
   }
 
   if (remoteHit && (targetHits.length === 0 || remoteHit.hit.distance <= targetHits[0].distance)) {
     if (shotContext?.remoteIds?.has(remoteHit.remote.id)) {
-      spawnTracer(visualOrigin, direction, remoteHit.hit.distance, true, profile);
+      spawnShotTracer(visualOrigin, origin, direction, remoteHit.hit.distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.remoteIds?.add(remoteHit.remote.id);
     reportPlayerHit(remoteHit.remote, remoteHit.hit, origin, direction, profile);
-    spawnTracer(visualOrigin, direction, remoteHit.hit.distance, true, profile);
+    spawnShotTracer(visualOrigin, origin, direction, remoteHit.hit.distance, true, profile);
     return { blocked: false, hit: true };
   }
 
   if (targetHits.length > 0) {
     const targetIndex = targetHits[0].object.userData.targetIndex;
     if (shotContext?.targetIndexes?.has(targetIndex)) {
-      spawnTracer(visualOrigin, direction, targetHits[0].distance, true, profile);
+      spawnShotTracer(visualOrigin, origin, direction, targetHits[0].distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.targetIndexes?.add(targetIndex);
     const target = targets[targetIndex];
     hitTarget(target, targetHits[0], profile);
-    spawnTracer(visualOrigin, direction, targetHits[0].distance, true, profile);
+    spawnShotTracer(visualOrigin, origin, direction, targetHits[0].distance, true, profile);
     return { blocked: false, hit: true };
   }
 
   if (forgivingHit?.remote) {
     if (shotContext?.remoteIds?.has(forgivingHit.remote.id)) {
-      spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
+      spawnShotTracer(visualOrigin, origin, direction, forgivingHit.hit.distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.remoteIds?.add(forgivingHit.remote.id);
     reportPlayerHit(forgivingHit.remote, forgivingHit.hit, origin, direction, profile);
-    spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
+    spawnShotTracer(visualOrigin, origin, direction, forgivingHit.hit.distance, true, profile);
     return { blocked: false, hit: true };
   }
 
   if (forgivingHit?.target) {
     const targetIndex = getTargetIndex(forgivingHit.target);
     if (shotContext?.targetIndexes?.has(targetIndex)) {
-      spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
+      spawnShotTracer(visualOrigin, origin, direction, forgivingHit.hit.distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.targetIndexes?.add(targetIndex);
     hitTarget(forgivingHit.target, forgivingHit.hit, profile);
-    spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
+    spawnShotTracer(visualOrigin, origin, direction, forgivingHit.hit.distance, true, profile);
     return { blocked: false, hit: true };
   }
 
-  spawnTracer(visualOrigin, direction, profile.missDistance, false, profile);
+  spawnShotTracer(visualOrigin, origin, direction, profile.missDistance, false, profile);
   return { blocked: false, hit: false };
+}
+
+function spawnShotTracer(visualOrigin, shotOrigin, shotDirection, shotDistance, hit, profile = null) {
+  const impactPoint = shotOrigin.clone().addScaledVector(shotDirection, Math.max(shotDistance, 0.08));
+  const visualDirection = impactPoint.sub(visualOrigin);
+  const visualLength = visualDirection.length();
+  if (visualLength < 0.08) {
+    spawnTracer(visualOrigin, shotDirection, 0.08, hit, profile);
+    return;
+  }
+  spawnTracer(visualOrigin, visualDirection.normalize(), visualLength, hit, profile);
 }
 
 function getLocalTracerOrigin(fallback) {
@@ -2969,7 +2980,7 @@ function spawnTracer(origin, direction, length, hit, profile = null) {
     return;
   }
 
-  const radius = profile?.tracerRadius ?? (hit ? 0.012 : 0.008);
+  const radius = (profile?.tracerRadius ?? (hit ? 0.012 : 0.008)) * 1.65;
   const fadeTime = profile?.tracerLifetime ?? 0.08;
   const color = hit ? (profile?.hitColor ?? 0xffdf8a) : (profile?.tracerColor ?? 0x2aa8ff);
   const group = new THREE.Group();
@@ -3023,7 +3034,7 @@ function spawnTracer(origin, direction, length, hit, profile = null) {
 }
 
 function spawnLightningTracer(origin, direction, length, hit, profile = null) {
-  const radius = profile?.tracerRadius ?? 0.012;
+  const radius = (profile?.tracerRadius ?? 0.012) * 1.65;
   const material = new THREE.MeshBasicMaterial({
     color: hit ? (profile?.hitColor ?? 0xf1d6ff) : (profile?.tracerColor ?? 0xb465ff),
     transparent: true,

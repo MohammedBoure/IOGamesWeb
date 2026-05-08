@@ -25,7 +25,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.05, -0.04, -0.18],
       localRotation: [0.012, 0.56, -0.12],
       muzzleOffset: [0.02, 0.04, -0.5],
-      fire: { style: "sidearm", auto: false, interval: 0.15, range: 64, damage: 1, spread: 0.0012, recoil: 0.065, pitchKick: 0.0028, yawKick: 0.001, aimAssist: 0.018, hitRadius: 0.135, mobility: 1.08, tracerSpeed: 185, tracerLength: 2.1, tracerRadius: 0.008, tracerLifetime: 1, flashScale: 0.92, muzzleIntensity: 10, tracerColor: 0xffd68a, hitColor: 0xfff0b8, missDistance: 38 }
+      fire: { style: "sidearm", auto: false, interval: 0.15, range: 64, damage: 3, spread: 0.0012, recoil: 0.065, pitchKick: 0.0028, yawKick: 0.001, aimAssist: 0.018, hitRadius: 0.135, mobility: 1.08, tracerSpeed: 185, tracerLength: 2.1, tracerRadius: 0.026, tracerLifetime: 1, flashScale: 1.12, muzzleIntensity: 15, tracerColor: 0xffd68a, hitColor: 0xfff0b8, missDistance: 38 }
     },
     {
       id: "long-pistol",
