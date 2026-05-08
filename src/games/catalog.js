@@ -7,6 +7,9 @@ export const games = [
     map: "aim_arena",
     summary: "Fast deathmatch movement and clean aim inside a 3D arena.",
     controls: "Z/S/Q/D move, Space jump, Mouse aim, Left Click shoot",
+    label: "Shooter",
+    pace: "Fast rounds",
+    capacity: "12 players",
     image: "/assets/games/neon-aim-arena.png",
     accent: "blue",
     load: () => import("./neon-aim-arena/index.js")
@@ -19,6 +22,9 @@ export const games = [
     map: "neon_circuit",
     summary: "A 3D circuit race with checkpoints and drifting.",
     controls: "Z accelerate, S brake, Q/D steer, Space drift",
+    label: "Racing",
+    pace: "Circuit laps",
+    capacity: "12 players",
     image: "/assets/games/neon-race-circuit.png",
     accent: "green",
     load: () => import("./neon-race-circuit/index.js")

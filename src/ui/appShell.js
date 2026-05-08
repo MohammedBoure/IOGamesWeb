@@ -1,7 +1,10 @@
 import { findGame, games } from "../games/catalog.js";
 import {
+  getStoredMatchId,
   getStoredPlayerName,
+  saveMatchId,
   savePlayerName,
+  sanitizeMatchId,
   sanitizePlayerName
 } from "../shared/playerProfile.js";
 
@@ -170,18 +173,28 @@ export function createArcadeApp(root) {
 
     const selectedGame = findGame(selectedGameId);
     const playerName = getStoredPlayerName(DEFAULT_PLAYER_NAME);
+    const lastMatchId = getStoredMatchId();
 
     root.innerHTML = `
       <section class="library-view" aria-label="IOGamesWeb">
         <header class="library-topbar">
-          <div>
-            <p class="eyebrow">IOGamesWeb</p>
-            <h1>Games</h1>
+          <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div>
+              <p class="eyebrow">IOGamesWeb</p>
+              <h1>Games</h1>
+            </div>
           </div>
-          <label class="profile-control">
-            <span>Player</span>
-            <input id="libraryPlayerName" type="text" maxlength="32" value="${escapeHtml(playerName)}" autocomplete="off" />
-          </label>
+          <div class="library-top-actions">
+            <div class="library-stat" aria-label="Available games">
+              <span>Games</span>
+              <strong>${games.length}</strong>
+            </div>
+            <label class="profile-control">
+              <span>Player</span>
+              <input id="libraryPlayerName" type="text" maxlength="32" value="${escapeHtml(playerName)}" autocomplete="off" />
+            </label>
+          </div>
         </header>
 
         <div class="library-layout">
@@ -193,6 +206,14 @@ export function createArcadeApp(root) {
             <p class="eyebrow">ROOM</p>
             <h2>${escapeHtml(selectedGame.title)}</h2>
             <p class="brief">${escapeHtml(selectedGame.summary)}</p>
+            <div class="selected-game-preview">
+              <img src="${escapeHtml(selectedGame.image)}" alt="" />
+              <div class="selected-game-metrics">
+                <span>${escapeHtml(selectedGame.label)}</span>
+                <span>${escapeHtml(selectedGame.pace)}</span>
+                <span>${escapeHtml(selectedGame.capacity)}</span>
+              </div>
+            </div>
             <div id="backendGate" class="backend-gate" data-status="${escapeHtml(backendGate.status)}" role="status" aria-live="polite">
               <span class="backend-gate-dot"></span>
               <span class="backend-gate-copy">
@@ -205,6 +226,10 @@ export function createArcadeApp(root) {
               <span>Match ID</span>
               <input id="libraryMatchId" type="text" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="123456" autocomplete="off" dir="ltr" />
             </label>
+            <div class="match-tools">
+              <button id="lastMatchButton" class="ghost-button compact" type="button" ${lastMatchId ? "" : "hidden"}>Last ${escapeHtml(lastMatchId)}</button>
+              <button id="clearMatchButton" class="ghost-button compact" type="button">Clear</button>
+            </div>
             <div class="room-actions">
               <button id="createRoomButton" class="primary-button" type="button">Create Room</button>
               <button id="joinRoomButton" class="ghost-button" type="button">Join Room</button>
@@ -228,8 +253,15 @@ export function createArcadeApp(root) {
           <img src="${escapeHtml(game.image)}" alt="" loading="lazy" />
         </span>
         <span class="game-meta">
-          <strong>${escapeHtml(game.title)}</strong>
+          <span class="game-card-head">
+            <strong>${escapeHtml(game.title)}</strong>
+            <em>${selected ? "Selected" : escapeHtml(game.label)}</em>
+          </span>
           <small>${escapeHtml(game.summary)}</small>
+          <span class="game-tags">
+            <span>${escapeHtml(game.pace)}</span>
+            <span>${escapeHtml(game.capacity)}</span>
+          </span>
         </span>
       </button>
     `;
@@ -242,6 +274,22 @@ export function createArcadeApp(root) {
 
     playerNameInput?.addEventListener("input", () => {
       savePlayerName(playerNameInput.value, DEFAULT_PLAYER_NAME);
+    });
+    matchIdInput?.addEventListener("input", () => {
+      const cleanMatchId = sanitizeMatchId(matchIdInput.value);
+      if (matchIdInput.value !== cleanMatchId) {
+        matchIdInput.value = cleanMatchId;
+      }
+      if (cleanMatchId.length === 6) {
+        saveMatchId(cleanMatchId);
+        status.textContent = "";
+      }
+    });
+    matchIdInput?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        root.querySelector("#joinRoomButton")?.click();
+      }
     });
 
     root.querySelectorAll("[data-game-id]").forEach((button) => {
@@ -265,16 +313,36 @@ export function createArcadeApp(root) {
         startBackendCheck(true);
         return;
       }
-      if (!matchIdInput?.value.trim()) {
-        status.textContent = "Enter a Match ID to join a room.";
+      const cleanMatchId = sanitizeMatchId(matchIdInput?.value);
+      if (matchIdInput && matchIdInput.value !== cleanMatchId) {
+        matchIdInput.value = cleanMatchId;
+      }
+      if (cleanMatchId.length !== 6) {
+        status.textContent = "Enter a 6-digit Match ID.";
         matchIdInput?.focus();
         return;
       }
-      launchGame("join", matchIdInput.value.trim());
+      saveMatchId(cleanMatchId);
+      launchGame("join", cleanMatchId);
     });
     root.querySelector("#retryBackendButton")?.addEventListener("click", () => {
       status.textContent = "";
       startBackendCheck(true);
+    });
+    root.querySelector("#lastMatchButton")?.addEventListener("click", () => {
+      const lastMatchId = getStoredMatchId();
+      if (matchIdInput && lastMatchId) {
+        matchIdInput.value = lastMatchId;
+        status.textContent = "";
+        matchIdInput.focus();
+      }
+    });
+    root.querySelector("#clearMatchButton")?.addEventListener("click", () => {
+      if (matchIdInput) {
+        matchIdInput.value = "";
+        matchIdInput.focus();
+      }
+      status.textContent = "";
     });
   }
 
@@ -314,8 +382,12 @@ export function createArcadeApp(root) {
     const matchIdInput = root.querySelector("#libraryMatchId");
     const playerName = savePlayerName(playerNameInput?.value, DEFAULT_PLAYER_NAME);
     const serverUrl = DEFAULT_SERVER_URL;
-    const matchId = matchIdOverride || matchIdInput?.value.trim() || "";
+    const matchId = roomAction === "join" ? sanitizeMatchId(matchIdOverride || matchIdInput?.value) : "";
     const token = ++launchToken;
+
+    if (roomAction === "join" && matchId) {
+      saveMatchId(matchId);
+    }
 
     document.body.dataset.screen = "game";
     root.innerHTML = `
@@ -390,6 +462,7 @@ export function createArcadeApp(root) {
     }
 
     root.querySelector("#roomDialogBackdrop")?.remove();
+    saveMatchId(matchId);
     const dialog = document.createElement("section");
     dialog.id = "roomDialogBackdrop";
     dialog.className = "room-dialog-backdrop";
@@ -448,7 +521,7 @@ export function createArcadeApp(root) {
   }
 
   renderLibrary();
-    if (new URLSearchParams(window.location.search).has("capture")) {
+  if (new URLSearchParams(window.location.search).has("capture")) {
     launchGame(null);
   } else {
     startBackendCheck();
@@ -539,7 +612,6 @@ export function createArcadeApp(root) {
     const retryButton = root.querySelector("#retryBackendButton");
     const createButton = root.querySelector("#createRoomButton");
     const joinButton = root.querySelector("#joinRoomButton");
-    const matchIdInput = root.querySelector("#libraryMatchId");
 
     if (gate) {
       gate.dataset.status = backendGate.status;
@@ -559,9 +631,6 @@ export function createArcadeApp(root) {
     }
     if (joinButton) {
       joinButton.disabled = !backendGate.ready;
-    }
-    if (matchIdInput) {
-      matchIdInput.disabled = !backendGate.ready;
     }
   }
 

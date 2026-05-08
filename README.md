@@ -11,6 +11,7 @@ Scalable online web games. The current build includes **Neon Aim Arena**, a 3D b
 - Create a match or join an existing match.
 - Simple 6-digit Match IDs.
 - Backend wake-up check for Render free instances before room actions.
+- Recent Match ID shortcut and cleaner room entry flow.
 - Deployment settings through `.env`.
 
 ## Requirements
@@ -133,6 +134,7 @@ From the home screen:
 6. The other player enters the same Match ID and clicks `Join Room`.
 
 The frontend calls the backend `/health` endpoint on the home screen. On Render's free plan, that request also wakes the sleeping backend and the UI keeps retrying while it shows a wait message.
+Match IDs are cleaned automatically to 6 digits, and the last valid Match ID is saved locally for quick reuse.
 
 The local player snapshot is available in the browser:
 
