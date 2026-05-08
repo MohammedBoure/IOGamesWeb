@@ -1,6 +1,9 @@
 const basePath = "/assets/games/neon-aim-arena/models";
 
 export const neonAimArenaAssets = {
+  loadout: {
+    primaryWeaponId: "AR_4"
+  },
   character: {
     id: "swat",
     name: "SWAT",

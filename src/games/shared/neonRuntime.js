@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { clone as cloneSkinnedModel } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 export function createNeonArenaRuntime(options = {}) {
 const runtimeOptions = {
@@ -104,6 +106,9 @@ const RACE_TRACK = {
 const COLLISION_SKIN = 0.08;
 const MOVE_STEP = 0.26;
 const WEAPON_CLIP_DISTANCE = 1.22;
+const LOCAL_WEAPON_MODEL_LENGTH = 1.46;
+const REMOTE_WEAPON_MODEL_LENGTH = 0.98;
+const REMOTE_CHARACTER_HEIGHT = 1.74;
 const tempVec3 = new THREE.Vector3();
 const tempVec2 = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
@@ -150,6 +155,7 @@ const DEFAULT_SERVER_URL = runtimeOptions.serverUrl || import.meta.env.VITE_WS_U
 const DEFAULT_PLAYER_NAME = runtimeOptions.playerName || import.meta.env.VITE_DEFAULT_PLAYER_NAME || "Player";
 const BACKEND_ACCESS_TOKEN = runtimeOptions.accessToken || import.meta.env.VITE_BACKEND_ACCESS_TOKEN || "";
 const EMPTY_SESSION_LABEL = "No session";
+const runtimeModels = createRuntimeAssetState(runtimeOptions.assets);
 const startCopy = {
   title: hud.startTitle?.textContent ?? "",
   brief: hud.startBrief?.textContent ?? "",
@@ -185,6 +191,7 @@ const state = {
 const velocity = new THREE.Vector3();
 const wishDir = new THREE.Vector3();
 const weapon = createWeapon();
+loadRuntimeModels();
 const audio = createAudioSystem();
 const race = {
   world: new THREE.Group(),
@@ -749,51 +756,236 @@ function chooseAccent(x, z) {
   return [materials.accentBlue, materials.accentGreen, materials.accentAmber][Math.abs(Math.round(x + z)) % 3];
 }
 
+function createRuntimeAssetState(assetConfig = {}) {
+  const weapons = Array.isArray(assetConfig?.weapons) ? assetConfig.weapons : [];
+  const preferredWeaponId = assetConfig?.loadout?.primaryWeaponId || assetConfig?.primaryWeaponId || "AR_4";
+  const weaponAsset = (
+    weapons.find((asset) => asset.id === preferredWeaponId) ||
+    weapons.find((asset) => /^AR_/.test(asset.id ?? "")) ||
+    weapons.find((asset) => asset.type === "weapon") ||
+    null
+  );
+
+  return {
+    loader: new GLTFLoader(),
+    character: createModelEntry(assetConfig?.character, "character"),
+    weapon: createModelEntry(weaponAsset, "weapon")
+  };
+}
+
+function createModelEntry(asset, kind) {
+  return {
+    kind,
+    asset: asset?.path ? asset : null,
+    gltf: null,
+    promise: null,
+    failed: false
+  };
+}
+
+function loadRuntimeModels() {
+  loadModelEntry(runtimeModels.weapon).then((gltf) => {
+    if (disposed || !gltf) {
+      return;
+    }
+    mountWeaponModel();
+    for (const remote of remotePlayers.values()) {
+      mountRemoteWeaponModel(remote);
+    }
+  });
+
+  loadModelEntry(runtimeModels.character).then((gltf) => {
+    if (disposed || !gltf) {
+      return;
+    }
+    for (const remote of remotePlayers.values()) {
+      mountRemoteCharacterModel(remote);
+    }
+  });
+}
+
+function loadModelEntry(entry) {
+  if (!entry?.asset?.path) {
+    return Promise.resolve(null);
+  }
+  if (entry.gltf) {
+    return Promise.resolve(entry.gltf);
+  }
+  if (!entry.promise) {
+    entry.promise = runtimeModels.loader.loadAsync(entry.asset.path)
+      .then((gltf) => {
+        entry.gltf = gltf;
+        return gltf;
+      })
+      .catch((error) => {
+        entry.failed = true;
+        console.warn(`Could not load ${entry.kind} model: ${entry.asset.path}`, error);
+        return null;
+      });
+  }
+  return entry.promise;
+}
+
+function mountWeaponModel() {
+  if (!runtimeModels.weapon.gltf || !weapon.modelMount) {
+    return;
+  }
+  const model = cloneRuntimeModel(runtimeModels.weapon.gltf);
+  prepareRuntimeModel(model);
+  fitWeaponModel(model, LOCAL_WEAPON_MODEL_LENGTH, new THREE.Vector3(0.02, -0.03, -0.09));
+  weapon.modelMount.clear();
+  weapon.modelMount.add(model);
+  weapon.fallbackGroup.visible = false;
+  weapon.model = model;
+}
+
+function mountRemoteCharacterModel(remote) {
+  if (remote.kind !== "shooter" || remote.characterModel || !runtimeModels.character.gltf || !remote.characterMount) {
+    return;
+  }
+  const model = cloneRuntimeModel(runtimeModels.character.gltf);
+  prepareRuntimeModel(model);
+  fitCharacterModel(model, REMOTE_CHARACTER_HEIGHT);
+  remote.characterMount.clear();
+  remote.characterMount.add(model);
+  remote.characterModel = model;
+  remote.fallbackBodyGroup.visible = false;
+  setupRemoteCharacterAnimation(remote, model, runtimeModels.character.gltf.animations);
+}
+
+function mountRemoteWeaponModel(remote) {
+  if (remote.kind !== "shooter" || remote.weaponModel || !runtimeModels.weapon.gltf || !remote.weaponMount) {
+    return;
+  }
+  const model = cloneRuntimeModel(runtimeModels.weapon.gltf);
+  prepareRuntimeModel(model);
+  fitWeaponModel(model, REMOTE_WEAPON_MODEL_LENGTH, new THREE.Vector3(0, 0, 0));
+  remote.weaponMount.clear();
+  remote.weaponMount.add(model);
+  remote.weaponModel = model;
+  remote.fallbackWeaponGroup.visible = false;
+}
+
+function cloneRuntimeModel(gltf) {
+  return cloneSkinnedModel(gltf.scene);
+}
+
+function prepareRuntimeModel(model) {
+  model.traverse((child) => {
+    if (!child.isMesh) {
+      return;
+    }
+    child.castShadow = true;
+    child.receiveShadow = false;
+    child.frustumCulled = false;
+  });
+}
+
+function fitWeaponModel(model, targetLength, offset) {
+  model.position.set(0, 0, 0);
+  model.rotation.set(0, Math.PI / 2, 0);
+  model.scale.setScalar(1);
+  scaleObjectToAxis(model, "z", targetLength);
+  centerObject(model, true);
+  model.position.add(offset);
+}
+
+function fitCharacterModel(model, targetHeight) {
+  model.position.set(0, 0, 0);
+  model.rotation.set(0, 0, 0);
+  model.scale.setScalar(1);
+  scaleObjectToAxis(model, "y", targetHeight);
+  centerObject(model, false);
+}
+
+function scaleObjectToAxis(object, axis, targetSize) {
+  object.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const currentSize = Math.max(size[axis], 0.001);
+  object.scale.multiplyScalar(targetSize / currentSize);
+  object.updateMatrixWorld(true);
+}
+
+function centerObject(object, centerY) {
+  object.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(object);
+  const center = box.getCenter(new THREE.Vector3());
+  object.position.x -= center.x;
+  object.position.z -= center.z;
+  object.position.y -= centerY ? center.y : box.min.y;
+}
+
+function setupRemoteCharacterAnimation(remote, model, animations = []) {
+  const idleClip = findAnimationClip(animations, ["Idle_Gun_Pointing", "Idle_Gun", "Idle", "Idle_Neutral"]);
+  if (!idleClip) {
+    return;
+  }
+  remote.mixer = new THREE.AnimationMixer(model);
+  remote.idleAction = remote.mixer.clipAction(idleClip);
+  remote.idleAction.play();
+}
+
+function findAnimationClip(animations, names) {
+  for (const name of names) {
+    const clip = THREE.AnimationClip.findByName(animations, name);
+    if (clip) {
+      return clip;
+    }
+  }
+  return null;
+}
+
 function createWeapon() {
   const group = new THREE.Group();
   group.position.set(0.42, -0.44, -0.88);
   group.rotation.set(-0.055, -0.1, 0.018);
   camera.add(group);
 
+  const modelMount = new THREE.Group();
+  const fallbackGroup = new THREE.Group();
+  group.add(modelMount);
+  group.add(fallbackGroup);
+
   const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.18, 0.68), materials.weapon);
   receiver.castShadow = true;
-  group.add(receiver);
+  fallbackGroup.add(receiver);
 
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.38), materials.platformDark);
   stock.position.set(0.02, -0.01, 0.46);
   stock.rotation.x = -0.08;
-  group.add(stock);
+  fallbackGroup.add(stock);
 
   const rail = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.07, 0.9), materials.platformDark);
   rail.position.y = 0.14;
-  group.add(rail);
+  fallbackGroup.add(rail);
 
   const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.045, 0.72, 14), materials.weapon);
   barrel.rotation.x = Math.PI / 2;
   barrel.position.set(0, 0.04, -0.66);
-  group.add(barrel);
+  fallbackGroup.add(barrel);
 
   const muzzleBrake = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.08, 0.12), materials.platformDark);
   muzzleBrake.position.set(0, 0.04, -1.04);
-  group.add(muzzleBrake);
+  fallbackGroup.add(muzzleBrake);
 
   const magazine = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.18), materials.platformDark);
   magazine.position.set(0.03, -0.28, -0.04);
   magazine.rotation.x = 0.18;
-  group.add(magazine);
+  fallbackGroup.add(magazine);
 
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.35, 0.17), materials.platformDark);
   grip.position.set(0, -0.24, 0.16);
   grip.rotation.x = -0.24;
-  group.add(grip);
+  fallbackGroup.add(grip);
 
   const sideStrip = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.035, 0.48), materials.accentGreen);
   sideStrip.position.set(-0.27, 0.04, -0.14);
-  group.add(sideStrip);
+  fallbackGroup.add(sideStrip);
 
   const sight = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.15), materials.accentBlue);
   sight.position.set(0, 0.23, -0.22);
-  group.add(sight);
+  fallbackGroup.add(sight);
 
   const muzzle = new THREE.PointLight(0xffe4a6, 0, 3.2, 1.8);
   muzzle.position.set(0, 0.04, -0.95);
@@ -807,6 +999,8 @@ function createWeapon() {
 
   return {
     group,
+    modelMount,
+    fallbackGroup,
     muzzle,
     flash,
     flashTimer: 0,
@@ -2343,12 +2537,35 @@ function upsertRemotePlayer(playerInfo) {
   updateRemotePlayerState(playerInfo.id, playerInfo.state);
 }
 
+function createRemoteHitbox(geometry, playerId) {
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    colorWrite: false
+  });
+  const hitbox = new THREE.Mesh(geometry, material);
+  hitbox.userData.remotePlayerId = playerId;
+  return hitbox;
+}
+
 function createRemotePlayer(playerInfo) {
   const group = new THREE.Group();
   group.position.set(0, 0, 0);
   scene.add(group);
 
   const color = colorFromId(playerInfo.id);
+  const characterMount = new THREE.Group();
+  const fallbackBodyGroup = new THREE.Group();
+  const hitboxGroup = new THREE.Group();
+  const weaponMount = new THREE.Group();
+  const fallbackWeaponGroup = new THREE.Group();
+
+  weaponMount.position.set(0.31, 1.06, -0.48);
+  weaponMount.rotation.set(-0.08, -0.04, -0.1);
+  group.add(characterMount, fallbackBodyGroup, fallbackWeaponGroup, weaponMount, hitboxGroup);
+
   const bodyMaterial = new THREE.MeshStandardMaterial({
     color,
     roughness: 0.48,
@@ -2369,77 +2586,90 @@ function createRemotePlayer(playerInfo) {
     metalness: 0.08
   });
 
+  const bodyHitbox = createRemoteHitbox(new THREE.CapsuleGeometry(0.33, 0.78, 6, 12), playerInfo.id);
+  bodyHitbox.position.y = 0.95;
+  hitboxGroup.add(bodyHitbox);
+
+  const chestHitbox = createRemoteHitbox(new THREE.BoxGeometry(0.58, 0.42, 0.18), playerInfo.id);
+  chestHitbox.position.set(0, 1.13, -0.17);
+  hitboxGroup.add(chestHitbox);
+
+  const headHitbox = createRemoteHitbox(new THREE.SphereGeometry(0.26, 18, 12), playerInfo.id);
+  headHitbox.position.y = 1.58;
+  hitboxGroup.add(headHitbox);
+
+  const visorHitbox = createRemoteHitbox(new THREE.BoxGeometry(0.34, 0.08, 0.08), playerInfo.id);
+  visorHitbox.position.set(0, 1.61, -0.25);
+  hitboxGroup.add(visorHitbox);
+
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.33, 0.78, 6, 12), bodyMaterial);
   body.position.y = 0.95;
   body.castShadow = true;
-  body.userData.remotePlayerId = playerInfo.id;
-  group.add(body);
+  fallbackBodyGroup.add(body);
 
   const chest = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.42, 0.18), armorMaterial);
   chest.position.set(0, 1.13, -0.17);
   chest.castShadow = true;
-  chest.userData.remotePlayerId = playerInfo.id;
-  group.add(chest);
+  fallbackBodyGroup.add(chest);
 
   const spineLight = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.58, 0.035), materials.accentBlue);
   spineLight.position.set(0, 1.12, 0.24);
-  group.add(spineLight);
+  fallbackBodyGroup.add(spineLight);
 
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 18, 12), bodyMaterial);
   head.position.y = 1.58;
   head.castShadow = true;
-  head.userData.remotePlayerId = playerInfo.id;
-  group.add(head);
+  fallbackBodyGroup.add(head);
 
   const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.36), armorMaterial);
   helmet.position.y = 1.69;
   helmet.castShadow = true;
-  group.add(helmet);
+  fallbackBodyGroup.add(helmet);
 
   const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.06), visorMaterial);
   visor.position.set(0, 1.61, -0.25);
-  visor.userData.remotePlayerId = playerInfo.id;
-  group.add(visor);
+  fallbackBodyGroup.add(visor);
 
   for (const side of [-1, 1]) {
     const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.22), armorMaterial);
     shoulder.position.set(side * 0.39, 1.3, -0.02);
     shoulder.rotation.z = side * 0.2;
     shoulder.castShadow = true;
-    group.add(shoulder);
+    fallbackBodyGroup.add(shoulder);
 
     const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.5, 5, 8), bodyMaterial);
     arm.position.set(side * 0.47, 0.98, -0.08);
     arm.rotation.z = side * 0.16;
     arm.castShadow = true;
-    group.add(arm);
+    fallbackBodyGroup.add(arm);
 
     const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.095, 0.52, 5, 8), bodyMaterial);
     leg.position.set(side * 0.14, 0.36, 0.01);
     leg.castShadow = true;
-    group.add(leg);
+    fallbackBodyGroup.add(leg);
 
     const boot = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.09, 0.28), materials.platformDark);
     boot.position.set(side * 0.14, 0.08, -0.06);
     boot.castShadow = true;
-    group.add(boot);
+    fallbackBodyGroup.add(boot);
   }
 
   const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.82), materials.weapon);
-  rifle.position.set(0.31, 1.06, -0.38);
-  rifle.rotation.set(-0.08, -0.04, -0.1);
-  group.add(rifle);
+  rifle.position.set(0, 0, 0.1);
+  fallbackWeaponGroup.add(rifle);
 
   const rifleBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.032, 0.42, 10), materials.weapon);
-  rifleBarrel.position.set(0.31, 1.06, -0.98);
+  rifleBarrel.position.set(0, 0, -0.5);
   rifleBarrel.rotation.x = Math.PI / 2;
-  group.add(rifleBarrel);
+  fallbackWeaponGroup.position.copy(weaponMount.position);
+  fallbackWeaponGroup.rotation.copy(weaponMount.rotation);
+  fallbackWeaponGroup.add(rifleBarrel);
 
   const label = createNameSprite(playerInfo.name ?? "Player", color);
   label.position.y = 2.16;
   group.add(label);
 
-  return {
+  const remote = {
     id: playerInfo.id,
     kind: "shooter",
     name: playerInfo.name ?? "Player",
@@ -2449,13 +2679,25 @@ function createRemotePlayer(playerInfo) {
     maxHealth: playerInfo.max_health ?? 5,
     alive: playerInfo.alive !== false,
     group,
+    characterMount,
+    fallbackBodyGroup,
+    weaponMount,
+    fallbackWeaponGroup,
     label,
-    hitboxes: [body, chest, head, visor],
+    hitboxes: [bodyHitbox, chestHitbox, headHitbox, visorHitbox],
     targetPosition: new THREE.Vector3(0, 0, 0),
     targetYaw: 0,
     pendingHit: 0,
-    lastSeen: performance.now()
+    lastSeen: performance.now(),
+    mixer: null,
+    idleAction: null,
+    characterModel: null,
+    weaponModel: null
   };
+
+  mountRemoteCharacterModel(remote);
+  mountRemoteWeaponModel(remote);
+  return remote;
 }
 
 function createRemoteRacePlayer(playerInfo) {
@@ -2528,6 +2770,7 @@ function updateRemotePlayers(dt) {
   for (const remote of remotePlayers.values()) {
     remote.group.position.lerp(remote.targetPosition, 1 - Math.exp(-16 * dt));
     remote.group.rotation.y = THREE.MathUtils.damp(remote.group.rotation.y, remote.targetYaw, 14, dt);
+    remote.mixer?.update(dt);
     remote.label.lookAt(camera.getWorldPosition(tempVec3));
     remote.group.visible = remote.kind === activeKind && remote.alive && now - remote.lastSeen < 6000;
   }
@@ -2538,6 +2781,7 @@ function removeRemotePlayer(playerId) {
   if (!remote) {
     return;
   }
+  remote.mixer?.stopAllAction();
   remote.group.parent?.remove(remote.group);
   remotePlayers.delete(playerId);
 }
