@@ -2985,13 +2985,13 @@ function updateRemoteProceduralPose(remote, posture, dt) {
 
   const slideLean = remote.postureBlend;
   const jumpLean = remote.airborneBlend * (posture === "jump" ? -0.14 : 0.12);
-  remote.characterMount.position.y = THREE.MathUtils.damp(remote.characterMount.position.y, -0.42 * slideLean, 10, dt);
+  remote.characterMount.position.y = THREE.MathUtils.damp(remote.characterMount.position.y, 0.12 * slideLean, 10, dt);
   remote.characterMount.rotation.x = THREE.MathUtils.damp(remote.characterMount.rotation.x, -0.52 * slideLean + jumpLean, 9, dt);
   remote.characterMount.rotation.z = THREE.MathUtils.damp(remote.characterMount.rotation.z, 0.12 * slideLean, 9, dt);
   remote.characterMount.scale.y = THREE.MathUtils.damp(remote.characterMount.scale.y, 1 - 0.22 * slideLean, 9, dt);
 
   if (remote.hitboxGroup) {
-    remote.hitboxGroup.position.y = THREE.MathUtils.damp(remote.hitboxGroup.position.y, -0.24 * slideLean, 10, dt);
+    remote.hitboxGroup.position.y = THREE.MathUtils.damp(remote.hitboxGroup.position.y, 0, 10, dt);
     remote.hitboxGroup.scale.y = THREE.MathUtils.damp(remote.hitboxGroup.scale.y, 1 - 0.24 * slideLean, 10, dt);
   }
 }
