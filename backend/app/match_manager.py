@@ -311,7 +311,8 @@ class MatchManager:
                 raise ClientMessageError("target_dead", "Target is already dead.")
 
             match = self._matches[attacker.match_id]
-            victim.health = max(0, victim.health - 1)
+            damage = clamp_int(payload.get("damage", 1), 1, 3)
+            victim.health = max(0, victim.health - damage)
             victim.last_seen = utc_now()
             match_state = self._public_match_state_locked(match.id)
             recipients = set(match.players)
@@ -635,8 +636,12 @@ def clean_action_payload(payload: Any) -> JsonDict:
             clean[key] = [round(float(item), 4) for item in value]
     if is_number(payload.get("client_time")):
         clean["client_time"] = float(payload["client_time"])
+    if is_number(payload.get("weaponSlot")):
+        clean["weaponSlot"] = clamp_int(payload.get("weaponSlot"), 0, 8)
     if isinstance(payload.get("weapon"), str):
         clean["weapon"] = payload["weapon"][:32]
+    if isinstance(payload.get("style"), str):
+        clean["style"] = payload["style"][:32]
     return clean
 
 

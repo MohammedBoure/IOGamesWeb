@@ -1124,6 +1124,40 @@ function getWeaponSlotById(weaponId) {
   return runtimeModels.weapons.findIndex((entry) => entry.asset?.id === weaponId);
 }
 
+function getWeaponEntryById(weaponId) {
+  return runtimeModels.weapons.find((entry) => entry.asset?.id === weaponId) ?? getSelectedWeaponEntry();
+}
+
+function getSelectedWeaponProfile() {
+  return getWeaponProfile(getSelectedWeaponAsset());
+}
+
+function getWeaponProfileById(weaponId) {
+  return getWeaponProfile(getWeaponEntryById(weaponId)?.asset);
+}
+
+function getWeaponProfile(asset = {}) {
+  const fire = asset?.fire ?? {};
+  return {
+    id: asset?.id ?? "weapon",
+    name: asset?.name ?? "Weapon",
+    style: fire.style ?? "rifle",
+    auto: fire.auto !== false,
+    interval: Number(fire.interval) || FIRE_INTERVAL,
+    range: Number(fire.range) || 95,
+    damage: THREE.MathUtils.clamp(Number(fire.damage) || 1, 1, 3),
+    spread: Number(fire.spread) || 0.001,
+    projectiles: THREE.MathUtils.clamp(Math.trunc(Number(fire.projectiles) || 1), 1, 6),
+    recoil: Number(fire.recoil) || 0.12,
+    pitchKick: Number(fire.pitchKick) || 0.004,
+    yawKick: Number(fire.yawKick) || 0.002,
+    tracerColor: Number(fire.tracerColor) || 0x2aa8ff,
+    hitColor: Number(fire.hitColor) || 0xffdf8a,
+    tracerRadius: Number(fire.tracerRadius) || 0.01,
+    missDistance: Number(fire.missDistance) || 48
+  };
+}
+
 function mountWeaponModel() {
   const entry = getSelectedWeaponEntry();
   if (!entry?.gltf || !weapon.modelMount) {
@@ -1135,8 +1169,10 @@ function mountWeaponModel() {
   fitWeaponModel(
     model,
     asset.modelLength ?? LOCAL_WEAPON_MODEL_LENGTH,
-    new THREE.Vector3(asset.localOffset?.[0] ?? 0.02, asset.localOffset?.[1] ?? -0.03, asset.localOffset?.[2] ?? -0.09)
+    vectorFromArray(asset.localOffset, 0.02, -0.03, -0.09),
+    asset.localRotation
   );
+  positionWeaponMuzzle(asset);
   weapon.modelMount.clear();
   weapon.modelMount.add(model);
   weapon.fallbackGroup.visible = false;
@@ -1189,7 +1225,12 @@ function mountRemoteWeaponModel(remote) {
   if (shouldAttachToHand) {
     fitHandWeaponModel(model, entry.asset);
   } else {
-    fitWeaponModel(model, entry.asset?.remoteLength ?? REMOTE_WEAPON_MODEL_LENGTH, new THREE.Vector3(0, 0, 0));
+    fitWeaponModel(
+      model,
+      entry.asset?.remoteLength ?? REMOTE_WEAPON_MODEL_LENGTH,
+      new THREE.Vector3(0, 0, 0),
+      entry.asset?.remoteRotation
+    );
   }
 
   if (!shouldAttachToHand) {
@@ -1235,9 +1276,9 @@ function findRuntimeModelNode(model, names) {
   return null;
 }
 
-function fitWeaponModel(model, targetLength, offset) {
+function fitWeaponModel(model, targetLength, offset, rotation = null) {
   model.position.set(0, 0, 0);
-  model.rotation.set(0, Math.PI / 2, 0);
+  setEulerFromArray(model.rotation, rotation, 0, 0, 0);
   model.scale.setScalar(1);
   scaleObjectToLongestAxis(model, targetLength);
   centerObject(model, true);
@@ -1246,11 +1287,18 @@ function fitWeaponModel(model, targetLength, offset) {
 
 function fitHandWeaponModel(model, asset = {}) {
   model.position.set(0, 0, 0);
-  model.rotation.set(0, 0, Math.PI / 2);
+  setEulerFromArray(model.rotation, asset.handRotation, 0, 0, Math.PI / 2);
   model.scale.setScalar(1);
   scaleObjectToLongestAxis(model, asset.handLength ?? REMOTE_HAND_WEAPON_LENGTH);
   centerObject(model, true);
   model.position.set(0.02, 0.22, -0.025);
+}
+
+function positionWeaponMuzzle(asset = {}) {
+  const muzzle = vectorFromArray(asset.muzzleOffset, 0, 0.04, -0.92);
+  weapon.muzzle.position.copy(muzzle);
+  weapon.flash.position.copy(muzzle);
+  weapon.flash.position.z += 0.06;
 }
 
 function fitCharacterModel(model, targetHeight) {
@@ -1277,6 +1325,21 @@ function scaleObjectToLongestAxis(object, targetSize) {
   const currentSize = Math.max(size.x, size.y, size.z, 0.001);
   object.scale.multiplyScalar(targetSize / currentSize);
   object.updateMatrixWorld(true);
+}
+
+function vectorFromArray(value, fallbackX = 0, fallbackY = 0, fallbackZ = 0) {
+  if (!Array.isArray(value) || value.length < 3) {
+    return new THREE.Vector3(fallbackX, fallbackY, fallbackZ);
+  }
+  return new THREE.Vector3(Number(value[0]) || 0, Number(value[1]) || 0, Number(value[2]) || 0);
+}
+
+function setEulerFromArray(euler, value, fallbackX = 0, fallbackY = 0, fallbackZ = 0) {
+  if (!Array.isArray(value) || value.length < 3) {
+    euler.set(fallbackX, fallbackY, fallbackZ);
+    return;
+  }
+  euler.set(Number(value[0]) || 0, Number(value[1]) || 0, Number(value[2]) || 0);
 }
 
 function centerObject(object, centerY) {
@@ -1351,8 +1414,8 @@ function setRemoteAnimation(remote, animationName, fade = 0.16) {
 
 function createWeapon() {
   const group = new THREE.Group();
-  group.position.set(0.42, -0.44, -0.88);
-  group.rotation.set(-0.055, -0.1, 0.018);
+  group.position.set(0.06, -0.5, -0.82);
+  group.rotation.set(-0.045, -0.16, 0.028);
   camera.add(group);
 
   const modelMount = new THREE.Group();
@@ -1444,6 +1507,7 @@ function selectWeaponSlot(slot, announce = true) {
   weapon.fallbackGroup.visible = true;
   weapon.clipPull = 0;
   state.recoil = 0;
+  positionWeaponMuzzle(entry.asset);
 
   loadModelEntry(entry).then((modelSource) => {
     if (disposed || state.weaponSlot !== nextSlot || !modelSource) {
@@ -1527,7 +1591,7 @@ function setupEvents() {
 
   addEvent(window, "keydown", (event) => {
     const key = normalizeInputKey(event);
-    const weaponSlot = getTopNumberSlot(event);
+    const weaponSlot = state.running && state.mode === GAME_MODES.SHOOTER && !state.paused ? getTopNumberSlot(event) : null;
     if (event.ctrlKey) {
       keys.add("control");
     }
@@ -2032,7 +2096,7 @@ function updateGame(dt, time) {
   }
 
   updateMovement(dt, time);
-  if (state.firing && state.fireTimer <= 0) {
+  if (state.firing && getSelectedWeaponProfile().auto && state.fireTimer <= 0) {
     shoot();
   }
   updateLocalSnapshot();
@@ -2390,56 +2454,46 @@ function shoot() {
     return;
   }
 
-  state.fireTimer = FIRE_INTERVAL;
-  state.recoil = Math.min(state.recoil + 0.145, 0.92);
-  pitch.rotation.x = THREE.MathUtils.clamp(pitch.rotation.x - 0.004 - state.recoil * 0.0014, -1.34, 1.2);
-  player.rotation.y -= randomRange(-0.0018, 0.0018) * (1 + state.recoil);
+  const profile = getSelectedWeaponProfile();
+  state.fireTimer = profile.interval;
+  state.recoil = Math.min(state.recoil + profile.recoil, 1.15);
+  pitch.rotation.x = THREE.MathUtils.clamp(pitch.rotation.x - profile.pitchKick - state.recoil * 0.0012, -1.34, 1.2);
+  player.rotation.y += randomRange(-profile.yawKick, profile.yawKick) * (1 + state.recoil * 0.35);
   weapon.flash.visible = true;
-  weapon.flashTimer = 0.045;
-  weapon.muzzle.intensity = 11;
+  weapon.flashTimer = profile.style === "ray" ? 0.07 : 0.045;
+  weapon.flash.scale.setScalar(profile.style === "sniper" ? 1.45 : profile.projectiles > 1 ? 1.18 : 1);
+  weapon.muzzle.intensity = profile.style === "ray" ? 18 : profile.style === "sniper" ? 16 : 11 + profile.projectiles * 1.5;
   audio.shoot();
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
-  camera.getWorldDirection(tempVec3);
-  const spread = 0.0009 + state.recoil * 0.0042;
-  tempVec3.x += randomRange(-spread, spread);
-  tempVec3.y += randomRange(-spread, spread);
-  tempVec3.z += randomRange(-spread, spread);
-  tempVec3.normalize();
-
-  raycaster.set(origin, tempVec3);
-  raycaster.far = 95;
-
-  const worldHitDistance = intersectWorldColliders(origin, tempVec3, raycaster.far);
-  const remoteHit = intersectRemotePlayers();
+  const baseDirection = camera.getWorldDirection(new THREE.Vector3()).normalize();
   sendNetworkAction("shoot", {
     origin: [round4(origin.x), round4(origin.y), round4(origin.z)],
-    direction: [round4(tempVec3.x), round4(tempVec3.y), round4(tempVec3.z)],
-    weapon: getSelectedWeaponAsset()?.id ?? "weapon",
+    direction: [round4(baseDirection.x), round4(baseDirection.y), round4(baseDirection.z)],
+    weapon: profile.id,
+    weaponSlot: state.weaponSlot,
+    style: profile.style,
     client_time: round4(clock.elapsedTime)
   });
-  const hitObjects = targets.filter((target) => target.alive).flatMap((target) => [target.body, target.core]);
-  const hits = raycaster.intersectObjects(hitObjects, false);
-  const nearestTargetDistance = hits[0]?.distance ?? Infinity;
-  const nearestRemoteDistance = remoteHit?.hit.distance ?? Infinity;
-  const nearestDamageDistance = Math.min(nearestTargetDistance, nearestRemoteDistance);
 
-  if (worldHitDistance !== null && worldHitDistance <= nearestDamageDistance) {
-    spawnTracer(origin, raycaster.ray.direction, worldHitDistance, true);
-    spawnRingBurst(origin.clone().addScaledVector(raycaster.ray.direction, worldHitDistance), materials.platformDark);
+  let hits = 0;
+  let blocked = 0;
+  for (let index = 0; index < profile.projectiles; index++) {
+    const shotDirection = createShotDirection(baseDirection, profile, index);
+    const result = resolveWeaponShot(origin, shotDirection, profile);
+    if (result.hit) {
+      hits += 1;
+    } else if (result.blocked) {
+      blocked += 1;
+    }
+  }
+
+  if (hits > 0) {
+    showPulseMarker();
+  } else if (blocked > 0) {
     showToast("Blocked");
     audio.miss();
-  } else if (remoteHit && (hits.length === 0 || remoteHit.hit.distance <= hits[0].distance)) {
-    reportPlayerHit(remoteHit.remote, remoteHit.hit, origin, raycaster.ray.direction);
-    spawnTracer(origin, raycaster.ray.direction, remoteHit.hit.distance, true);
-    showPulseMarker();
-  } else if (hits.length > 0) {
-    const target = targets[hits[0].object.userData.targetIndex];
-    hitTarget(target, hits[0]);
-    spawnTracer(origin, raycaster.ray.direction, hits[0].distance, true);
-    showPulseMarker();
   } else {
-    spawnTracer(origin, raycaster.ray.direction, 48, false);
     showToast("Miss");
     audio.miss();
   }
@@ -2447,14 +2501,58 @@ function shoot() {
   updateHud();
 }
 
-function hitTarget(target, hit) {
+function createShotDirection(baseDirection, profile, projectileIndex = 0) {
+  const spread = profile.spread * (projectileIndex === 0 ? 0.45 : 1);
+  const direction = baseDirection.clone();
+  direction.x += randomRange(-spread, spread);
+  direction.y += randomRange(-spread * 0.55, spread * 0.55);
+  direction.z += randomRange(-spread, spread);
+  return direction.normalize();
+}
+
+function resolveWeaponShot(origin, direction, profile) {
+  raycaster.set(origin, direction);
+  raycaster.far = profile.range;
+
+  const worldHitDistance = intersectWorldColliders(origin, direction, raycaster.far);
+  const remoteHit = intersectRemotePlayers();
+  const hitObjects = targets.filter((target) => target.alive).flatMap((target) => [target.body, target.core]);
+  const targetHits = raycaster.intersectObjects(hitObjects, false);
+  const nearestTargetDistance = targetHits[0]?.distance ?? Infinity;
+  const nearestRemoteDistance = remoteHit?.hit.distance ?? Infinity;
+  const nearestDamageDistance = Math.min(nearestTargetDistance, nearestRemoteDistance);
+
+  if (worldHitDistance !== null && worldHitDistance <= nearestDamageDistance) {
+    spawnTracer(origin, direction, worldHitDistance, true, profile);
+    spawnRingBurst(origin.clone().addScaledVector(direction, worldHitDistance), materials.platformDark);
+    return { blocked: true, hit: false };
+  }
+
+  if (remoteHit && (targetHits.length === 0 || remoteHit.hit.distance <= targetHits[0].distance)) {
+    reportPlayerHit(remoteHit.remote, remoteHit.hit, origin, direction, profile);
+    spawnTracer(origin, direction, remoteHit.hit.distance, true, profile);
+    return { blocked: false, hit: true };
+  }
+
+  if (targetHits.length > 0) {
+    const target = targets[targetHits[0].object.userData.targetIndex];
+    hitTarget(target, targetHits[0], profile);
+    spawnTracer(origin, direction, targetHits[0].distance, true, profile);
+    return { blocked: false, hit: true };
+  }
+
+  spawnTracer(origin, direction, profile.missDistance, false, profile);
+  return { blocked: false, hit: false };
+}
+
+function hitTarget(target, hit, profile = null) {
   target.alive = false;
   target.group.visible = false;
   target.respawn = randomRange(0.28, 0.58);
-  state.stamina = Math.min(100, state.stamina + 8);
+  state.stamina = Math.min(100, state.stamina + 6 + (profile?.damage ?? 1) * 2);
 
   spawnRingBurst(hit.point, materials.targetBody);
-  showToast("Hit");
+  showToast(profile ? `${profile.name} hit` : "Hit");
   audio.hit();
 }
 
@@ -2502,15 +2600,17 @@ function intersectWorldColliders(origin, direction, maxDistance) {
   return nearest < maxDistance ? nearest : null;
 }
 
-function reportPlayerHit(remote, hit, origin, direction) {
+function reportPlayerHit(remote, hit, origin, direction, profile = null) {
   remote.pendingHit = performance.now();
-  state.stamina = Math.min(100, state.stamina + 12);
+  state.stamina = Math.min(100, state.stamina + 8 + (profile?.damage ?? 1) * 3);
   spawnRingBurst(hit.point, materials.targetBody);
-  showToast(`Hit ${remote.name}`);
+  showToast(`Hit ${remote.name}${profile?.damage > 1 ? ` x${profile.damage}` : ""}`);
   audio.hit();
   sendNetwork({
     type: "player_hit",
     target_id: remote.id,
+    damage: profile?.damage ?? 1,
+    weapon: profile?.id ?? "weapon",
     hit: {
       point: [round4(hit.point.x), round4(hit.point.y), round4(hit.point.z)],
       origin: [round4(origin.x), round4(origin.y), round4(origin.z)],
@@ -2616,12 +2716,13 @@ function updateEffects(dt, time) {
   }
 }
 
-function spawnTracer(origin, direction, length, hit) {
-  const geometry = new THREE.CylinderGeometry(hit ? 0.012 : 0.008, hit ? 0.004 : 0.003, length, 8);
+function spawnTracer(origin, direction, length, hit, profile = null) {
+  const radius = profile?.tracerRadius ?? (hit ? 0.012 : 0.008);
+  const geometry = new THREE.CylinderGeometry(hit ? radius * 1.15 : radius, hit ? radius * 0.38 : radius * 0.36, length, 8);
   const material = new THREE.MeshBasicMaterial({
-    color: hit ? 0xffdf8a : 0x2aa8ff,
+    color: hit ? (profile?.hitColor ?? 0xffdf8a) : (profile?.tracerColor ?? 0x2aa8ff),
     transparent: true,
-    opacity: hit ? 0.72 : 0.38,
+    opacity: hit ? 0.78 : 0.44,
     blending: THREE.AdditiveBlending,
     depthWrite: false
   });
@@ -3177,7 +3278,7 @@ function sendNetworkAction(action, payload) {
   if (!network.connected || !network.matchId) {
     return;
   }
-  sendNetwork({ type: action, payload });
+  sendNetwork({ type: action, payload: { action, ...payload } });
 }
 
 function sendNetwork(message) {
@@ -3652,7 +3753,12 @@ function drawRemoteAction(payload, playerId = null) {
   }
   const origin = new THREE.Vector3(payload.origin[0], payload.origin[1], payload.origin[2]);
   const direction = new THREE.Vector3(payload.direction[0], payload.direction[1], payload.direction[2]).normalize();
-  spawnTracer(origin, direction, 42, false);
+  const profile = payload.weapon
+    ? getWeaponProfileById(payload.weapon)
+    : getWeaponProfile(getWeaponEntryForSlot(payload.weaponSlot)?.asset);
+  for (let index = 0; index < profile.projectiles; index++) {
+    spawnTracer(origin, createShotDirection(direction, profile, index), Math.min(profile.missDistance, profile.range), false, profile);
+  }
   if (playerId) {
     const remote = remotePlayers.get(playerId);
     if (remote) {

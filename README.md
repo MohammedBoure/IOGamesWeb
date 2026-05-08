@@ -124,6 +124,8 @@ ws://127.0.0.1:8000/ws
 - `X`: return to game library
 - `Esc`: pause
 
+The shooter weapon slots have different firing behavior: sidearm, hand cannon, quick burst, automatic rifle, sniper, ray beam, and lightning spread.
+
 ## Multiplayer
 
 From the home screen:
