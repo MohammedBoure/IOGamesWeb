@@ -699,6 +699,16 @@ input {
   padding: 14px;
 }
 
+body[data-mode="shooter"] .hud-bottom {
+  right: auto;
+  width: min(560px, calc(100vw - 32px));
+  justify-content: flex-start;
+}
+
+body[data-mode="shooter"] .motion-panel {
+  width: min(340px, calc(100vw - 164px));
+}
+
 .race-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(96px, 1fr));

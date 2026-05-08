@@ -1292,11 +1292,12 @@ function prepareViewWeaponModel(model) {
     const displayMaterials = sourceMaterials.map((material) => {
       const next = material.clone();
       if (next.color?.isColor) {
-        next.color.lerp(liftColor, 0.14);
+        next.color.offsetHSL(0, -0.02, 0.08);
+        next.color.lerp(liftColor, 0.035);
       }
       if (next.emissive?.isColor && next.color?.isColor) {
-        next.emissive.copy(next.color).multiplyScalar(0.16);
-        next.emissiveIntensity = Math.max(next.emissiveIntensity || 0, 0.18);
+        next.emissive.copy(next.color).multiplyScalar(0.08);
+        next.emissiveIntensity = Math.max(next.emissiveIntensity || 0, 0.08);
       }
       if ("shininess" in next) {
         next.shininess = Math.max(next.shininess ?? 0, 42);
@@ -1359,8 +1360,8 @@ function positionWeaponMuzzle(asset = {}) {
 }
 
 function applyWeaponViewPose(asset = {}, immediate = false) {
-  weapon.basePosition.copy(vectorFromArray(asset.viewPosition, 0.04, -0.62, -0.98));
-  setEulerFromArray(weapon.baseRotation, asset.viewRotation, -0.05, -0.21, 0.022);
+  weapon.basePosition.copy(vectorFromArray(asset.viewPosition, 0.28, -0.47, -0.84));
+  setEulerFromArray(weapon.baseRotation, asset.viewRotation, -0.08, -0.34, 0.038);
   weapon.viewMount.position.copy(vectorFromArray(asset.viewOffset, 0, 0, 0));
   setEulerFromArray(weapon.viewMount.rotation, asset.viewMountRotation, 0, 0, 0);
   const scale = Number(asset.viewScale) || 1;
@@ -1485,8 +1486,8 @@ function setRemoteAnimation(remote, animationName, fade = 0.16) {
 
 function createWeapon() {
   const group = new THREE.Group();
-  group.position.set(0.04, -0.62, -0.98);
-  group.rotation.set(-0.05, -0.21, 0.022);
+  group.position.set(0.28, -0.47, -0.84);
+  group.rotation.set(-0.08, -0.34, 0.038);
   camera.add(group);
 
   const viewMount = new THREE.Group();
@@ -1546,12 +1547,12 @@ function createWeapon() {
   flash.visible = false;
   viewMount.add(flash);
 
-  const viewKeyLight = new THREE.PointLight(0xffffff, 1.35, 3.4, 1.45);
-  viewKeyLight.position.set(-0.34, 0.36, 0.42);
+  const viewKeyLight = new THREE.PointLight(0xffffff, 2.05, 3.6, 1.35);
+  viewKeyLight.position.set(-0.48, 0.42, 0.5);
   viewMount.add(viewKeyLight);
 
-  const viewFillLight = new THREE.PointLight(0x9fe8ff, 0.58, 2.8, 1.6);
-  viewFillLight.position.set(0.28, -0.12, -0.26);
+  const viewFillLight = new THREE.PointLight(0x9fe8ff, 0.9, 3, 1.45);
+  viewFillLight.position.set(0.34, -0.08, -0.3);
   viewMount.add(viewFillLight);
 
   return {
@@ -2303,7 +2304,7 @@ function updateMovement(dt, time) {
   pitch.rotation.z = THREE.MathUtils.damp(pitch.rotation.z, -strafeInput * 0.032 + state.motionRoll * (0.45 + slideBlend), 9, dt);
   camera.fov = THREE.MathUtils.damp(
     camera.fov,
-    74 + Math.min(speed * 1.05, 13) + (slideActive ? 4.2 : state.hopAssistTimer > 0 ? 2.1 : 0) + state.motionKick * 10,
+    82 + Math.min(speed * 0.72, 10) + (slideActive ? 4.8 : state.hopAssistTimer > 0 ? 2.4 : 0) + state.motionKick * 9,
     5.6,
     dt
   );
@@ -2609,7 +2610,7 @@ function applyAimAssist(origin, direction, profile, projectileIndex = 0) {
   const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
   const projectileScale = projectileIndex === 0 ? 1 : 0.42;
   const edgeFalloff = 1 - THREE.MathUtils.clamp(candidate.missRatio, 0, 1);
-  const strength = THREE.MathUtils.clamp((0.22 + speedPressure * 0.16) * edgeFalloff * projectileScale, 0, 0.42);
+  const strength = THREE.MathUtils.clamp((0.14 + speedPressure * 0.1) * edgeFalloff * projectileScale, 0, 0.28);
   return direction.clone().lerp(candidate.direction, strength).normalize();
 }
 
@@ -2696,8 +2697,8 @@ function findAimCandidate(origin, direction, profile, projectileIndex = 0) {
   const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
   const chainPressure = THREE.MathUtils.clamp(state.bhopChain / BHOP_CHAIN_MAX, 0, 1);
   const projectileScale = projectileIndex === 0 ? 1 : 0.55;
-  const cone = (profile.aimAssist + speedPressure * 0.008 + chainPressure * 0.004) * projectileScale;
-  const extraRadius = (profile.hitRadius + speedPressure * 0.08 + chainPressure * 0.04) * projectileScale;
+  const cone = (profile.aimAssist + speedPressure * 0.004 + chainPressure * 0.002) * projectileScale;
+  const extraRadius = (profile.hitRadius + speedPressure * 0.045 + chainPressure * 0.025) * projectileScale;
   let best = null;
 
   for (const target of targets) {
