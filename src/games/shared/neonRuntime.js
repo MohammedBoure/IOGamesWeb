@@ -1148,6 +1148,7 @@ function getWeaponProfile(asset = {}) {
     sidearm: [0.021, 0.17],
     "hand-cannon": [0.017, 0.14],
     "quick-burst": [0.023, 0.18],
+    shotgun: [0.008, 0.08],
     rifle: [0.019, 0.15],
     sniper: [0.01, 0.09],
     ray: [0.027, 0.2],
@@ -1164,7 +1165,7 @@ function getWeaponProfile(asset = {}) {
     range: Number(fire.range) || 95,
     damage: THREE.MathUtils.clamp(Number(fire.damage) || 1, 1, 3),
     spread: Number(fire.spread) || 0.001,
-    projectiles: THREE.MathUtils.clamp(Math.trunc(Number(fire.projectiles) || 1), 1, 6),
+    projectiles: THREE.MathUtils.clamp(Math.trunc(Number(fire.projectiles) || 1), 1, 12),
     recoil: Number(fire.recoil) || 0.12,
     pitchKick: Number(fire.pitchKick) || 0.004,
     yawKick: Number(fire.yawKick) || 0.002,
@@ -1179,7 +1180,9 @@ function getWeaponProfile(asset = {}) {
     tracerLifetime: Math.max(0.04, Number(fire.tracerLifetime) || 1),
     flashScale: Math.max(0.4, Number(fire.flashScale) || 1),
     muzzleIntensity: Math.max(2, Number(fire.muzzleIntensity) || 12),
-    missDistance: Number(fire.missDistance) || 48
+    missDistance: Number(fire.missDistance) || 48,
+    pelletMinRange: Math.max(0.5, Number(fire.pelletMinRange) || 0),
+    pelletRadiusVariance: THREE.MathUtils.clamp(Number(fire.pelletRadiusVariance) || 0, 0, 0.8)
   };
 }
 
@@ -2582,8 +2585,9 @@ function shoot() {
     targetIndexes: new Set()
   };
   for (let index = 0; index < profile.projectiles; index++) {
-    const shotDirection = applyAimAssist(origin, createShotDirection(baseDirection, profile, index), profile, index);
-    const result = resolveWeaponShot(origin, shotDirection, profile, shotContext);
+    const projectileProfile = getProjectileProfile(profile);
+    const shotDirection = applyAimAssist(origin, createShotDirection(baseDirection, projectileProfile, index), projectileProfile, index);
+    const result = resolveWeaponShot(origin, shotDirection, projectileProfile, shotContext);
     if (result.hit) {
       hits += 1;
     } else if (result.blocked) {
@@ -2604,8 +2608,41 @@ function shoot() {
   updateHud();
 }
 
+function getProjectileProfile(profile) {
+  if (profile.style !== "shotgun") {
+    return profile;
+  }
+  const minRange = THREE.MathUtils.clamp(profile.pelletMinRange || profile.range * 0.35, 0.5, profile.range);
+  const range = randomRange(minRange, profile.range);
+  const radiusVariance = profile.pelletRadiusVariance;
+  const radiusScale = randomRange(1 - radiusVariance, 1 + radiusVariance);
+  return {
+    ...profile,
+    range,
+    missDistance: Math.min(profile.missDistance, range),
+    tracerRadius: Math.max(0.003, profile.tracerRadius * radiusScale)
+  };
+}
+
 function createShotDirection(baseDirection, profile, projectileIndex = 0) {
   const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
+  if (profile.style === "shotgun") {
+    const direction = baseDirection.clone().normalize();
+    const right = new THREE.Vector3().crossVectors(direction, WORLD_UP);
+    if (right.lengthSq() < 0.001) {
+      right.set(1, 0, 0);
+    } else {
+      right.normalize();
+    }
+    const up = new THREE.Vector3().crossVectors(right, direction).normalize();
+    const spread = profile.spread * randomRange(0.3, 1.15) * (1 + speedPressure * 0.18);
+    const angle = randomRange(0, Math.PI * 2);
+    const horizontal = Math.cos(angle) * spread + randomRange(-profile.spread * 0.18, profile.spread * 0.18);
+    const vertical = Math.sin(angle) * spread * 0.72 + randomRange(-profile.spread * 0.16, profile.spread * 0.16);
+    direction.addScaledVector(right, horizontal);
+    direction.addScaledVector(up, vertical);
+    return direction.normalize();
+  }
   const spread = profile.spread * (projectileIndex === 0 ? 0.34 : 0.82) * (1 + speedPressure * 0.22);
   const direction = baseDirection.clone();
   direction.x += randomRange(-spread, spread);
@@ -4128,7 +4165,14 @@ function drawRemoteAction(payload, playerId = null) {
     ? getWeaponProfileById(payload.weapon)
     : getWeaponProfile(getWeaponEntryForSlot(payload.weaponSlot)?.asset);
   for (let index = 0; index < profile.projectiles; index++) {
-    spawnTracer(origin, createShotDirection(direction, profile, index), Math.min(profile.missDistance, profile.range), false, profile);
+    const projectileProfile = getProjectileProfile(profile);
+    spawnTracer(
+      origin,
+      createShotDirection(direction, projectileProfile, index),
+      Math.min(projectileProfile.missDistance, projectileProfile.range),
+      false,
+      projectileProfile
+    );
   }
   if (playerId) {
     const remote = remotePlayers.get(playerId);
