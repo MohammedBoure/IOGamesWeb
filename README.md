@@ -81,6 +81,7 @@ The frontend is organized around an app shell that can host more games:
 - `src/shared/playerProfile.js`: stores the player name in `localStorage`.
 - `src/games/catalog.js`: list of games shown on the home screen.
 - `src/games/<game>/index.js`: isolated entry point for each game.
+- `src/games/<game>/assets.js`: optional game asset manifest for models and media.
 - `src/games/shared/`: shared runtime or assets used only when needed.
 - `public/assets/games/`: game images used in the library.
 

@@ -9,3 +9,4 @@ test-results/
 backend/logs/
 __pycache__/
 *.py[cod]
+asset-sources/
