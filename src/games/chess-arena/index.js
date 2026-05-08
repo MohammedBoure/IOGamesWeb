@@ -75,19 +75,21 @@ function createChessArenaRuntime(options = {}) {
             <strong id="chessTurnValue">White to move</strong>
           </div>
         </div>
-        <div id="chessBoard" class="chess-board" aria-label="Chess board"></div>
+        <div class="chess-board-frame">
+          <div id="chessBoard" class="chess-board" aria-label="Chess board"></div>
+        </div>
       </div>
       <aside class="chess-panel">
-        <div class="chess-panel-section">
+        <div class="chess-panel-section chess-match-section">
           <span class="panel-label">Match</span>
           <strong id="chessMatchValue">Local</strong>
           <small id="chessStatusValue">Local board ready</small>
         </div>
-        <div class="chess-panel-section">
+        <div class="chess-panel-section chess-players-section">
           <span class="panel-label">Players</span>
           <div id="chessPlayers" class="chess-players"></div>
         </div>
-        <div class="chess-panel-section">
+        <div class="chess-panel-section chess-moves-section">
           <span class="panel-label">Moves</span>
           <ol id="chessMoves" class="chess-moves"></ol>
         </div>
