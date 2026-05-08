@@ -1168,6 +1168,7 @@ function getWeaponProfile(asset = {}) {
     yawKick: Number(fire.yawKick) || 0.002,
     aimAssist: Number(fire.aimAssist) || styleAim[0],
     hitRadius: Number(fire.hitRadius) || styleAim[1],
+    mobility: THREE.MathUtils.clamp(Number(fire.mobility) || 1, 0.85, 1.12),
     tracerColor: Number(fire.tracerColor) || 0x2aa8ff,
     hitColor: Number(fire.hitColor) || 0xffdf8a,
     tracerRadius: Number(fire.tracerRadius) || 0.01,
@@ -2195,6 +2196,7 @@ function updateMovement(dt, time) {
   const forwardInput = Number(keys.has("z")) - Number(keys.has("s"));
   const strafeInput = Number(keys.has("d")) - Number(keys.has("q"));
   const hasInput = forwardInput !== 0 || strafeInput !== 0;
+  const weaponMobility = getSelectedWeaponProfile().mobility;
   const ctrlHeld = isCtrlHeld();
   let slideActive = state.slideTimer > 0;
   let crouchActive = ctrlHeld && !slideActive;
@@ -2245,21 +2247,21 @@ function updateMovement(dt, time) {
     }
     if (hasInput) {
       if (slideActive) {
-        accelerate(wishDir, 7.4, 26, dt);
+        accelerate(wishDir, 6.9 * weaponMobility, 24, dt);
       } else if (crouchActive) {
-        accelerate(wishDir, 3.6, 24, dt);
+        accelerate(wishDir, 3.4 * weaponMobility, 22, dt);
       } else {
-        accelerate(wishDir, 6.4, 72, dt);
+        accelerate(wishDir, 5.9 * weaponMobility, 62, dt);
       }
     }
   } else {
     state.coyote = Math.max(0, state.coyote - dt);
     if (hasInput) {
-      applyAirControl(wishDir, dt, slideActive);
+      applyAirControl(wishDir, dt, slideActive, weaponMobility);
     }
   }
 
-  capHorizontalSpeed(getMovementSpeedCap(slideActive, crouchActive));
+  capHorizontalSpeed(getMovementSpeedCap(slideActive, crouchActive, weaponMobility));
   movePlayer(velocity.x * dt, velocity.z * dt);
 
   state.verticalVelocity += GRAVITY * dt;
@@ -2304,7 +2306,7 @@ function updateMovement(dt, time) {
   pitch.rotation.z = THREE.MathUtils.damp(pitch.rotation.z, -strafeInput * 0.032 + state.motionRoll * (0.45 + slideBlend), 9, dt);
   camera.fov = THREE.MathUtils.damp(
     camera.fov,
-    82 + Math.min(speed * 0.72, 10) + (slideActive ? 4.8 : state.hopAssistTimer > 0 ? 2.4 : 0) + state.motionKick * 9,
+    78 + Math.min(speed * 0.58, 8) + (slideActive ? 3.8 : state.hopAssistTimer > 0 ? 1.8 : 0) + state.motionKick * 8,
     5.6,
     dt
   );
@@ -2354,10 +2356,10 @@ function startPowerSlide(direction) {
   if (speed > 1.2) {
     steerHorizontalVelocity(slideDir, 0.18);
   }
-  const impulse = THREE.MathUtils.clamp(1.35 + speed * 0.11 + state.bhopChain * 0.08, 1.65, 3.85);
+  const impulse = THREE.MathUtils.clamp(1.2 + speed * 0.09 + state.bhopChain * 0.06, 1.45, 3.25);
   velocity.x += slideDir.x * impulse;
   velocity.z += slideDir.z * impulse;
-  state.slideTimer = SLIDE_DURATION + Math.min(speed * 0.018, 0.22);
+  state.slideTimer = SLIDE_DURATION + Math.min(speed * 0.014, 0.18);
   state.slideCooldown = SLIDE_COOLDOWN;
   state.motionStyle = "power-slide";
   state.motionTimer = state.slideTimer;
@@ -2371,7 +2373,7 @@ function startPowerSlide(direction) {
 
 function applyAirTuck(direction) {
   const tuckDir = normalizeFlatDirection(direction);
-  const impulse = THREE.MathUtils.clamp(0.8 + getHorizontalSpeed() * 0.04 + state.bhopChain * 0.05, 0.9, 2.1);
+  const impulse = THREE.MathUtils.clamp(0.7 + getHorizontalSpeed() * 0.035 + state.bhopChain * 0.04, 0.8, 1.75);
   velocity.x += tuckDir.x * impulse;
   velocity.z += tuckDir.z * impulse;
   state.verticalVelocity = Math.min(state.verticalVelocity, -7.1);
@@ -2403,15 +2405,15 @@ function applyPrecisionHop(direction, quality) {
   velocity.x = velocityDir.x * speed;
   velocity.z = velocityDir.z * speed;
 
-  const targetForwardSpeed = 6.7 + chain * 0.3 + strafeValue * 1.4;
+  const targetForwardSpeed = 6 + chain * 0.24 + strafeValue * 1.15;
   const forwardSpeed = velocity.x * direction.x + velocity.z * direction.z;
   const missingSpeed = Math.max(0, targetForwardSpeed - forwardSpeed);
-  const impulse = Math.min(0.22 + quality * 0.55 + strafeValue * 0.34, missingSpeed * 0.24);
+  const impulse = Math.min(0.18 + quality * 0.48 + strafeValue * 0.28, missingSpeed * 0.22);
   velocity.x += direction.x * impulse;
   velocity.z += direction.z * impulse;
 }
 
-function applyAirControl(direction, dt, slideActive) {
+function applyAirControl(direction, dt, slideActive, weaponMobility = 1) {
   const speed = getHorizontalSpeed();
   let strafeValue = 0;
   if (speed > 0.2) {
@@ -2421,8 +2423,8 @@ function applyAirControl(direction, dt, slideActive) {
   const chainFactor = THREE.MathUtils.clamp(state.bhopChain / BHOP_CHAIN_MAX, 0, 1);
   const assist = state.hopAssistTimer > 0 ? 1 : 0;
   const slidePenalty = slideActive ? 0.84 : 1;
-  const wishSpeed = (7.2 + chainFactor * 4.6 + strafeValue * 1.8 + assist * 1.1) * slidePenalty;
-  const accel = 11 + strafeValue * 20 + chainFactor * 6 + assist * 6;
+  const wishSpeed = (6.5 + chainFactor * 3.8 + strafeValue * 1.5 + assist * 0.9) * slidePenalty * weaponMobility;
+  const accel = 10 + strafeValue * 17 + chainFactor * 5 + assist * 5;
   accelerate(direction, wishSpeed, accel, dt);
   if (speed > 3 && (assist || state.bhopChain > 0) && strafeValue > 0.18) {
     steerHorizontalVelocity(direction, Math.min(0.16, dt * (0.8 + strafeValue * 2.2 + chainFactor * 1.3)));
@@ -2438,17 +2440,18 @@ function getHopQuality(horizontalSpeed) {
   return THREE.MathUtils.clamp((0.28 + landingTiming * 0.5 + pace * 0.22) * staminaFactor, 0.2, 1);
 }
 
-function getMovementSpeedCap(slideActive, crouchActive) {
+function getMovementSpeedCap(slideActive, crouchActive, weaponMobility = 1) {
   const chain = Math.min(state.bhopChain, BHOP_CHAIN_MAX);
-  let cap = state.grounded ? 8.8 : 10.6 + chain * 0.58;
+  let cap = state.grounded ? 7.8 : 9.3 + chain * 0.48;
   if (state.hopAssistTimer > 0 || chain > 0) {
-    cap = Math.max(cap, Math.min(11.2 + chain * 0.62, 18.4));
+    cap = Math.max(cap, Math.min(10.1 + chain * 0.52, 15.6));
   }
   if (slideActive) {
-    cap = Math.max(cap, Math.min(12.4 + chain * 0.42, 17.6));
+    cap = Math.max(cap, Math.min(11.1 + chain * 0.34, 15));
   }
+  cap *= weaponMobility;
   if (crouchActive && state.grounded && !slideActive) {
-    cap = Math.min(cap, 4.1);
+    cap = Math.min(cap, 3.8);
   }
   return cap;
 }
