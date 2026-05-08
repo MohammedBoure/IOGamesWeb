@@ -85,8 +85,16 @@ const PLAYER_HEIGHT = 1.72;
 const GRAVITY = -27;
 const JUMP_FORCE = 8.85;
 const COYOTE_TIME = 0.09;
-const BHOP_BUFFER = 0.18;
-const FAST_SLIDE_BUFFER = 0.16;
+const BHOP_BUFFER = 0.22;
+const FAST_SLIDE_BUFFER = 0.18;
+const PERFECT_HOP_WINDOW = 0.11;
+const HOP_CHAIN_TIMEOUT = 0.74;
+const HOP_ASSIST_TIME = 0.34;
+const BHOP_CHAIN_MAX = 12;
+const SLIDE_DURATION = 0.62;
+const SLIDE_COOLDOWN = 0.16;
+const CROUCH_HEIGHT = 1.18;
+const SLIDE_HEIGHT = 0.98;
 const TARGET_COUNT = 9;
 const FIRE_INTERVAL = 0.105;
 const GAME_MODES = {
@@ -179,6 +187,16 @@ const state = {
   bhopBuffer: 0,
   fastSlideBuffer: 0,
   slideTimer: 0,
+  slideCooldown: 0,
+  hopAssistTimer: 0,
+  chainTimer: 0,
+  groundTime: 0,
+  airTime: 0,
+  landingWindow: 0,
+  motionTimer: 0,
+  motionKick: 0,
+  motionRoll: 0,
+  motionStyle: "idle",
   stamina: 100,
   fireTimer: 0,
   jumpQueued: false,
@@ -1550,6 +1568,23 @@ function clearGameplayInput() {
   state.fastSlideBuffer = 0;
 }
 
+function resetMotionTech() {
+  state.bhopChain = 0;
+  state.bhopBuffer = 0;
+  state.fastSlideBuffer = 0;
+  state.slideTimer = 0;
+  state.slideCooldown = 0;
+  state.hopAssistTimer = 0;
+  state.chainTimer = 0;
+  state.groundTime = 0;
+  state.airTime = 0;
+  state.landingWindow = 0;
+  state.motionTimer = 0;
+  state.motionKick = 0;
+  state.motionRoll = 0;
+  state.motionStyle = "idle";
+}
+
 function resetRound(lockPointer) {
   state.mode = GAME_MODES.SHOOTER;
   applyGameMode();
@@ -1558,10 +1593,7 @@ function resetRound(lockPointer) {
   pitch.position.y = PLAYER_HEIGHT;
   pitch.rotation.set(0, 0, 0);
   velocity.set(0, 0, 0);
-  state.bhopChain = 0;
-  state.bhopBuffer = 0;
-  state.fastSlideBuffer = 0;
-  state.slideTimer = 0;
+  resetMotionTech();
   state.stamina = 100;
   state.fireTimer = 0;
   state.verticalVelocity = 0;
@@ -1814,10 +1846,7 @@ function exitToMenu() {
   velocity.set(0, 0, 0);
   state.verticalVelocity = 0;
   state.firing = false;
-  state.bhopChain = 0;
-  state.bhopBuffer = 0;
-  state.fastSlideBuffer = 0;
-  state.slideTimer = 0;
+  resetMotionTech();
   hud.pause.classList.remove("active");
   hud.start.classList.add("active");
   showToast("Exit");
@@ -1864,6 +1893,13 @@ function updateGame(dt, time) {
   state.bhopBuffer = Math.max(0, state.bhopBuffer - dt);
   state.fastSlideBuffer = Math.max(0, state.fastSlideBuffer - dt);
   state.slideTimer = Math.max(0, state.slideTimer - dt);
+  state.slideCooldown = Math.max(0, state.slideCooldown - dt);
+  state.hopAssistTimer = Math.max(0, state.hopAssistTimer - dt);
+  state.chainTimer = Math.max(0, state.chainTimer - dt);
+  state.landingWindow = Math.max(0, state.landingWindow - dt);
+  state.motionTimer = Math.max(0, state.motionTimer - dt);
+  state.motionKick = THREE.MathUtils.damp(state.motionKick, 0, 9, dt);
+  state.motionRoll = THREE.MathUtils.damp(state.motionRoll, 0, 8, dt);
   state.stamina = Math.min(100, state.stamina + dt * (state.grounded ? 9 : 5));
 
   if (!state.alive) {
@@ -1890,59 +1926,96 @@ function updateMovement(dt, time) {
   const strafeInput = Number(keys.has("d")) - Number(keys.has("q"));
   const hasInput = forwardInput !== 0 || strafeInput !== 0;
   const ctrlHeld = isCtrlHeld();
-  const slideActive = ctrlHeld || state.slideTimer > 0;
+  let slideActive = state.slideTimer > 0;
+  let crouchActive = ctrlHeld && !slideActive;
 
   wishDir.set(strafeInput, 0, -forwardInput);
   if (hasInput) {
     wishDir.normalize().applyAxisAngle(WORLD_UP, player.rotation.y);
   }
 
-  const horizontalSpeed = getHorizontalSpeed();
+  let horizontalSpeed = getHorizontalSpeed();
+  const moveIntent = hasInput ? wishDir : cameraForwardFlat();
   const bhopRequested = ctrlHeld && state.bhopBuffer > 0;
   const fastSlideRequested = ctrlHeld && state.fastSlideBuffer > 0;
   const canJump = state.grounded || state.coyote > 0;
-  if (fastSlideRequested && canJump) {
-    jump(true);
-    applyFastSlide(hasInput ? wishDir : cameraForwardFlat());
+  let wheelActionConsumed = false;
+
+  if (fastSlideRequested && state.slideCooldown <= 0) {
+    if (state.grounded) {
+      startPowerSlide(moveIntent);
+      slideActive = true;
+      crouchActive = false;
+      wheelActionConsumed = true;
+    } else {
+      applyAirTuck(moveIntent);
+      wheelActionConsumed = true;
+    }
     state.fastSlideBuffer = 0;
-  } else if ((state.jumpQueued || bhopRequested) && canJump) {
-    jump(bhopRequested);
+  }
+
+  if (!wheelActionConsumed && (state.jumpQueued || bhopRequested) && canJump) {
+    jump(bhopRequested ? "precision" : "normal", moveIntent);
   }
   state.jumpQueued = false;
+  horizontalSpeed = getHorizontalSpeed();
 
   if (state.grounded) {
     state.coyote = COYOTE_TIME;
-    const keepSpeed = slideActive && horizontalSpeed > 5.5;
-    if (!keepSpeed) {
-      applyFriction(dt, hasInput ? 7.8 : 12.5);
+    const landingMomentum = state.landingWindow > 0 && state.bhopChain > 0;
+    const keepSlideSpeed = slideActive && horizontalSpeed > 4.2;
+    if (keepSlideSpeed) {
+      applyFriction(dt, 0.55);
+    } else if (landingMomentum) {
+      applyFriction(dt, hasInput ? 2.2 : 3.6);
+    } else if (crouchActive) {
+      applyFriction(dt, hasInput ? 9.5 : 15.5);
     } else {
-      applyFriction(dt, state.slideTimer > 0 ? 0.65 : 1.35);
+      applyFriction(dt, hasInput ? 7.8 : 12.5);
     }
     if (hasInput) {
-      accelerate(wishDir, slideActive ? 8.4 : 6.2, slideActive ? 68 : 72, dt);
+      if (slideActive) {
+        accelerate(wishDir, 7.4, 26, dt);
+      } else if (crouchActive) {
+        accelerate(wishDir, 3.6, 24, dt);
+      } else {
+        accelerate(wishDir, 6.4, 72, dt);
+      }
     }
   } else {
     state.coyote = Math.max(0, state.coyote - dt);
     if (hasInput) {
-      accelerate(wishDir, Math.min(8.2 + state.bhopChain * 0.54, 14.4), slideActive ? 28 : 14, dt);
+      applyAirControl(wishDir, dt, slideActive);
     }
   }
 
-  capHorizontalSpeed(slideActive ? Math.min(11.6 + state.bhopChain * 0.78, 21.5) : 8.6);
+  capHorizontalSpeed(getMovementSpeedCap(slideActive, crouchActive));
   movePlayer(velocity.x * dt, velocity.z * dt);
 
   state.verticalVelocity += GRAVITY * dt;
   player.position.y += state.verticalVelocity * dt;
   state.wasGrounded = state.grounded;
   if (player.position.y <= 0) {
+    const justLanded = !state.wasGrounded;
     player.position.y = 0;
     state.verticalVelocity = 0;
     state.grounded = true;
-    if (!state.wasGrounded && !slideActive) {
+    state.airTime = 0;
+    if (justLanded) {
+      state.groundTime = 0;
+      state.landingWindow = PERFECT_HOP_WINDOW;
+      state.motionKick = Math.max(state.motionKick, Math.min(0.16, 0.035 + getHorizontalSpeed() * 0.006));
+    } else {
+      state.groundTime += dt;
+    }
+    if (state.chainTimer <= 0 && state.groundTime > 0.18 && !slideActive && state.bhopBuffer <= 0) {
       state.bhopChain = 0;
+      state.hopAssistTimer = 0;
     }
   } else {
     state.grounded = false;
+    state.airTime += dt;
+    state.groundTime = 0;
   }
 
   player.position.x = THREE.MathUtils.clamp(player.position.x, -HALF_ARENA + 1.2, HALF_ARENA - 1.2);
@@ -1950,56 +2023,188 @@ function updateMovement(dt, time) {
 
   const speed = getHorizontalSpeed();
   state.bob += dt * (state.grounded ? Math.min(16, speed * 1.75) : 6);
-  const crouchHeight = slideActive ? 1.14 : PLAYER_HEIGHT;
+  const crouchHeight = slideActive ? SLIDE_HEIGHT : crouchActive ? CROUCH_HEIGHT : PLAYER_HEIGHT;
+  const slideBlend = slideActive ? THREE.MathUtils.clamp(state.slideTimer / SLIDE_DURATION, 0, 1) : 0;
   pitch.position.y = THREE.MathUtils.damp(
     pitch.position.y,
     crouchHeight + Math.sin(state.bob) * (speed > 0.4 ? 0.038 : 0.008),
     13,
     dt
   );
-  pitch.rotation.z = THREE.MathUtils.damp(pitch.rotation.z, -strafeInput * 0.032, 9, dt);
-  camera.fov = THREE.MathUtils.damp(camera.fov, 74 + Math.min(speed * 1.2, 14), 5.6, dt);
+  pitch.rotation.z = THREE.MathUtils.damp(pitch.rotation.z, -strafeInput * 0.032 + state.motionRoll * (0.45 + slideBlend), 9, dt);
+  camera.fov = THREE.MathUtils.damp(
+    camera.fov,
+    74 + Math.min(speed * 1.05, 13) + (slideActive ? 4.2 : state.hopAssistTimer > 0 ? 2.1 : 0) + state.motionKick * 10,
+    5.6,
+    dt
+  );
   camera.updateProjectionMatrix();
 }
 
-function jump(isBhop) {
+function jump(mode = "normal", preferredDirection = null) {
   const horizontalSpeed = getHorizontalSpeed();
-  state.verticalVelocity = JUMP_FORCE + Math.min(horizontalSpeed, 13) * 0.035;
+  const isPrecisionHop = mode === "precision";
+  const hopQuality = isPrecisionHop ? getHopQuality(horizontalSpeed) : 0;
+  state.verticalVelocity = JUMP_FORCE + Math.min(horizontalSpeed, 13) * 0.028 + hopQuality * 0.22;
   state.grounded = false;
   state.coyote = 0;
+  state.groundTime = 0;
+  state.airTime = 0;
+  state.landingWindow = 0;
 
-  if (isBhop) {
+  if (isPrecisionHop) {
     state.bhopBuffer = 0;
-    state.bhopChain = Math.min(state.bhopChain + 1, 12);
-    state.stamina = Math.max(0, state.stamina - 3);
-    const forward = cameraForwardFlat();
-    const boost = Math.min(0.95 + state.bhopChain * 0.055, 1.55);
-    velocity.x += forward.x * boost;
-    velocity.z += forward.z * boost;
+    state.bhopChain = Math.min(state.bhopChain + 1, BHOP_CHAIN_MAX);
+    state.chainTimer = HOP_CHAIN_TIMEOUT;
+    state.hopAssistTimer = HOP_ASSIST_TIME + hopQuality * 0.16;
+    state.motionStyle = hopQuality > 0.72 ? "perfect-hop" : "precision-hop";
+    state.motionTimer = 0.36;
+    state.motionKick = Math.max(state.motionKick, 0.055 + hopQuality * 0.045);
+    state.stamina = Math.max(0, state.stamina - (hopQuality > 0.72 ? 2 : 4));
+    applyPrecisionHop(normalizeFlatDirection(preferredDirection), hopQuality);
     spawnRingBurst(player.position, materials.accentGreen);
+    if (state.bhopChain === 1 || state.bhopChain % 4 === 0) {
+      showToast(hopQuality > 0.72 ? `Perfect hop ${state.bhopChain}x` : `Precision hop ${state.bhopChain}x`);
+    }
     audio.bhop();
   } else {
     state.bhopChain = 0;
+    state.chainTimer = 0;
+    state.hopAssistTimer = 0;
+    state.motionStyle = "jump";
+    state.motionTimer = 0.24;
+    state.motionKick = Math.max(state.motionKick, 0.04);
     audio.jump();
   }
 }
 
-function applyFastSlide(direction) {
-  const slideDir = direction.clone();
-  slideDir.y = 0;
-  if (slideDir.lengthSq() < 0.001) {
-    slideDir.copy(cameraForwardFlat());
-  } else {
-    slideDir.normalize();
+function startPowerSlide(direction) {
+  const slideDir = normalizeFlatDirection(direction);
+  const speed = getHorizontalSpeed();
+  if (speed > 1.2) {
+    steerHorizontalVelocity(slideDir, 0.18);
   }
-  const impulse = Math.min(3.2 + state.bhopChain * 0.24 + getHorizontalSpeed() * 0.065, 6.25);
+  const impulse = THREE.MathUtils.clamp(1.35 + speed * 0.11 + state.bhopChain * 0.08, 1.65, 3.85);
   velocity.x += slideDir.x * impulse;
   velocity.z += slideDir.z * impulse;
-  state.verticalVelocity += 0.42;
-  state.slideTimer = 0.58;
-  state.stamina = Math.max(0, state.stamina - 5);
+  state.slideTimer = SLIDE_DURATION + Math.min(speed * 0.018, 0.22);
+  state.slideCooldown = SLIDE_COOLDOWN;
+  state.motionStyle = "power-slide";
+  state.motionTimer = state.slideTimer;
+  state.motionKick = Math.max(state.motionKick, 0.08);
+  state.motionRoll = getLocalRightVector().dot(slideDir) * -0.12;
+  state.stamina = Math.max(0, state.stamina - 6);
   spawnRingBurst(player.position, materials.accentGreen);
+  showToast("Power slide");
   audio.boost();
+}
+
+function applyAirTuck(direction) {
+  const tuckDir = normalizeFlatDirection(direction);
+  const impulse = THREE.MathUtils.clamp(0.8 + getHorizontalSpeed() * 0.04 + state.bhopChain * 0.05, 0.9, 2.1);
+  velocity.x += tuckDir.x * impulse;
+  velocity.z += tuckDir.z * impulse;
+  state.verticalVelocity = Math.min(state.verticalVelocity, -7.1);
+  state.motionStyle = "air-tuck";
+  state.motionTimer = 0.32;
+  state.motionKick = Math.max(state.motionKick, 0.065);
+  state.motionRoll = getLocalRightVector().dot(tuckDir) * -0.08;
+  state.stamina = Math.max(0, state.stamina - 4);
+  spawnRingBurst(player.position, materials.accentGreen);
+  showToast("Air tuck");
+  audio.boost();
+}
+
+function applyPrecisionHop(direction, quality) {
+  const speed = getHorizontalSpeed();
+  const chain = Math.min(state.bhopChain, BHOP_CHAIN_MAX);
+  if (speed < 0.2) {
+    const starter = 2.2 + quality * 1.1;
+    velocity.x += direction.x * starter;
+    velocity.z += direction.z * starter;
+    return;
+  }
+
+  const velocityDir = new THREE.Vector3(velocity.x, 0, velocity.z).normalize();
+  const alignment = THREE.MathUtils.clamp(velocityDir.dot(direction), -1, 1);
+  const strafeValue = 1 - Math.abs(alignment);
+  const redirect = THREE.MathUtils.clamp(0.08 + quality * 0.1 + strafeValue * 0.16, 0.06, 0.28);
+  velocityDir.lerp(direction, redirect).normalize();
+  velocity.x = velocityDir.x * speed;
+  velocity.z = velocityDir.z * speed;
+
+  const targetForwardSpeed = 6.7 + chain * 0.3 + strafeValue * 1.4;
+  const forwardSpeed = velocity.x * direction.x + velocity.z * direction.z;
+  const missingSpeed = Math.max(0, targetForwardSpeed - forwardSpeed);
+  const impulse = Math.min(0.22 + quality * 0.55 + strafeValue * 0.34, missingSpeed * 0.24);
+  velocity.x += direction.x * impulse;
+  velocity.z += direction.z * impulse;
+}
+
+function applyAirControl(direction, dt, slideActive) {
+  const speed = getHorizontalSpeed();
+  let strafeValue = 0;
+  if (speed > 0.2) {
+    const velocityDir = new THREE.Vector3(velocity.x, 0, velocity.z).normalize();
+    strafeValue = 1 - Math.abs(THREE.MathUtils.clamp(velocityDir.dot(direction), -1, 1));
+  }
+  const chainFactor = THREE.MathUtils.clamp(state.bhopChain / BHOP_CHAIN_MAX, 0, 1);
+  const assist = state.hopAssistTimer > 0 ? 1 : 0;
+  const slidePenalty = slideActive ? 0.84 : 1;
+  const wishSpeed = (7.2 + chainFactor * 4.6 + strafeValue * 1.8 + assist * 1.1) * slidePenalty;
+  const accel = 11 + strafeValue * 20 + chainFactor * 6 + assist * 6;
+  accelerate(direction, wishSpeed, accel, dt);
+  if (speed > 3 && (assist || state.bhopChain > 0) && strafeValue > 0.18) {
+    steerHorizontalVelocity(direction, Math.min(0.16, dt * (0.8 + strafeValue * 2.2 + chainFactor * 1.3)));
+  }
+}
+
+function getHopQuality(horizontalSpeed) {
+  const landingTiming = state.landingWindow > 0
+    ? THREE.MathUtils.clamp(state.landingWindow / PERFECT_HOP_WINDOW, 0, 1)
+    : THREE.MathUtils.clamp(1 - state.groundTime / 0.22, 0, 1) * 0.52;
+  const pace = THREE.MathUtils.clamp(horizontalSpeed / 10, 0, 1);
+  const staminaFactor = THREE.MathUtils.clamp(state.stamina / 28, 0.45, 1);
+  return THREE.MathUtils.clamp((0.28 + landingTiming * 0.5 + pace * 0.22) * staminaFactor, 0.2, 1);
+}
+
+function getMovementSpeedCap(slideActive, crouchActive) {
+  const chain = Math.min(state.bhopChain, BHOP_CHAIN_MAX);
+  let cap = state.grounded ? 8.8 : 10.6 + chain * 0.58;
+  if (state.hopAssistTimer > 0 || chain > 0) {
+    cap = Math.max(cap, Math.min(11.2 + chain * 0.62, 18.4));
+  }
+  if (slideActive) {
+    cap = Math.max(cap, Math.min(12.4 + chain * 0.42, 17.6));
+  }
+  if (crouchActive && state.grounded && !slideActive) {
+    cap = Math.min(cap, 4.1);
+  }
+  return cap;
+}
+
+function normalizeFlatDirection(direction) {
+  const flat = direction?.clone?.() ?? cameraForwardFlat();
+  flat.y = 0;
+  if (flat.lengthSq() < 0.001) {
+    return cameraForwardFlat();
+  }
+  return flat.normalize();
+}
+
+function steerHorizontalVelocity(direction, amount) {
+  const speed = getHorizontalSpeed();
+  if (speed < 0.2) {
+    return;
+  }
+  const current = new THREE.Vector3(velocity.x, 0, velocity.z).normalize();
+  current.lerp(direction, THREE.MathUtils.clamp(amount, 0, 1)).normalize();
+  velocity.x = current.x * speed;
+  velocity.z = current.z * speed;
+}
+
+function getLocalRightVector() {
+  return new THREE.Vector3(1, 0, 0).applyAxisAngle(WORLD_UP, player.rotation.y);
 }
 
 function accelerate(direction, wishSpeed, accel, dt) {
@@ -2426,7 +2631,7 @@ function getLocalAnimationState() {
   }
   const speed = getHorizontalSpeed();
   const crouching = isCtrlHeld();
-  if (state.slideTimer > 0 || (crouching && speed > 5.5)) {
+  if (state.slideTimer > 0) {
     return "slide";
   }
   if (crouching) {
@@ -2811,10 +3016,7 @@ function setLocalAlive(alive) {
     velocity.set(0, 0, 0);
     state.firing = false;
     state.verticalVelocity = 0;
-    state.bhopChain = 0;
-    state.bhopBuffer = 0;
-    state.fastSlideBuffer = 0;
-    state.slideTimer = 0;
+    resetMotionTech();
   }
 }
 
@@ -2825,6 +3027,7 @@ function respawnLocalPlayer(remoteState = null) {
   state.verticalVelocity = 0;
   state.grounded = false;
   state.coyote = 0;
+  resetMotionTech();
   state.stamina = 100;
   state.fireTimer = 0;
   state.recoil = 0;

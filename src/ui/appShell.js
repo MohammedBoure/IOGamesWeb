@@ -82,7 +82,7 @@ const GAME_VIEW_HTML = `
     <div class="modal">
       <p class="eyebrow">NEON AIM ARENA</p>
       <h1>Aim Arena</h1>
-      <p class="brief">Clear deathmatch fundamentals, fast movement, and clean aiming.</p>
+      <p class="brief">Precision hops, power slides, fast movement, and clean aiming.</p>
       <div class="mode-selector" aria-label="Game mode">
         <button id="shooterModeButton" class="mode-button active" type="button">Shooter</button>
         <button id="racingModeButton" class="mode-button" type="button">Car Racing</button>

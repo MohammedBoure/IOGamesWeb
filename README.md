@@ -116,8 +116,8 @@ ws://127.0.0.1:8000/ws
 - `Q`: left
 - `D`: right
 - `Space`: jump
-- `Ctrl + Mouse Wheel Up`: bunnyhop
-- `Ctrl + Mouse Wheel Down`: fast slide
+- `Ctrl + Mouse Wheel Up`: precision bunnyhop
+- `Ctrl + Mouse Wheel Down`: power slide on the ground, air tuck while airborne
 - `Mouse`: look
 - `Left Click`: shoot
 - `X`: return to game library

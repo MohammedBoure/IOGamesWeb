@@ -7,8 +7,8 @@ export const neonAimArena = {
   mode: "shooter",
   roomMode: "deathmatch",
   map: "aim_arena",
-  summary: "Fast deathmatch movement and clean aim inside a 3D arena.",
-  controls: "Z/S/Q/D move, Space jump, Mouse aim, Left Click shoot",
+  summary: "Fast deathmatch movement, precision hops, power slides, and clean aim inside a 3D arena.",
+  controls: "Z/S/Q/D move, Space jump, Ctrl + Wheel Up precision hop, Ctrl + Wheel Down power slide",
   assets: neonAimArenaAssets
 };
 
