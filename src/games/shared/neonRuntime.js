@@ -1153,6 +1153,8 @@ function getWeaponProfile(asset = {}) {
     ray: [0.027, 0.2],
     lightning: [0.034, 0.24]
   }[style] ?? [0.018, 0.14];
+  const rawTracerSpeed = Number(fire.tracerSpeed);
+  const defaultTracerSpeed = ["sniper", "ray", "lightning"].includes(style) ? 0 : 180;
   return {
     id: asset?.id ?? "weapon",
     name: asset?.name ?? "Weapon",
@@ -1172,6 +1174,11 @@ function getWeaponProfile(asset = {}) {
     tracerColor: Number(fire.tracerColor) || 0x2aa8ff,
     hitColor: Number(fire.hitColor) || 0xffdf8a,
     tracerRadius: Number(fire.tracerRadius) || 0.01,
+    tracerSpeed: Math.max(0, Number.isFinite(rawTracerSpeed) ? rawTracerSpeed : defaultTracerSpeed),
+    tracerLength: Math.max(0.08, Number(fire.tracerLength) || 3),
+    tracerLifetime: Math.max(0.04, Number(fire.tracerLifetime) || 0.08),
+    flashScale: Math.max(0.4, Number(fire.flashScale) || 1),
+    muzzleIntensity: Math.max(2, Number(fire.muzzleIntensity) || 12),
     missDistance: Number(fire.missDistance) || 48
   };
 }
@@ -1564,6 +1571,7 @@ function createWeapon() {
     muzzle,
     flash,
     flashTimer: 0,
+    flashBaseScale: 1,
     clipPull: 0,
     basePosition: group.position.clone(),
     baseRotation: group.rotation.clone()
@@ -2550,9 +2558,10 @@ function shoot() {
   pitch.rotation.x = THREE.MathUtils.clamp(pitch.rotation.x - profile.pitchKick * 0.58 - state.recoil * 0.00065, -1.34, 1.2);
   player.rotation.y += randomRange(-profile.yawKick, profile.yawKick) * 0.18;
   weapon.flash.visible = true;
-  weapon.flashTimer = profile.style === "ray" ? 0.07 : 0.045;
-  weapon.flash.scale.setScalar(profile.style === "sniper" ? 1.45 : profile.projectiles > 1 ? 1.18 : 1);
-  weapon.muzzle.intensity = profile.style === "ray" ? 18 : profile.style === "sniper" ? 16 : 11 + profile.projectiles * 1.5;
+  weapon.flashTimer = profile.style === "ray" ? 0.07 : profile.style === "sniper" ? 0.085 : 0.045;
+  weapon.flashBaseScale = profile.flashScale * (profile.projectiles > 1 ? 1.08 : 1);
+  weapon.flash.scale.setScalar(weapon.flashBaseScale);
+  weapon.muzzle.intensity = profile.muzzleIntensity + profile.projectiles * 0.8;
   audio.shoot();
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
@@ -2620,6 +2629,7 @@ function applyAimAssist(origin, direction, profile, projectileIndex = 0) {
 function resolveWeaponShot(origin, direction, profile, shotContext = null) {
   raycaster.set(origin, direction);
   raycaster.far = profile.range;
+  const visualOrigin = getLocalTracerOrigin(origin);
 
   const worldHitDistance = intersectWorldColliders(origin, direction, raycaster.far);
   const remoteHit = intersectRemotePlayers();
@@ -2632,60 +2642,67 @@ function resolveWeaponShot(origin, direction, profile, shotContext = null) {
   const nearestDamageDistance = Math.min(nearestTargetDistance, nearestRemoteDistance, nearestForgivingDistance);
 
   if (worldHitDistance !== null && worldHitDistance <= nearestDamageDistance) {
-    spawnTracer(origin, direction, worldHitDistance, true, profile);
+    spawnTracer(visualOrigin, direction, worldHitDistance, true, profile);
     spawnRingBurst(origin.clone().addScaledVector(direction, worldHitDistance), materials.platformDark);
     return { blocked: true, hit: false };
   }
 
   if (remoteHit && (targetHits.length === 0 || remoteHit.hit.distance <= targetHits[0].distance)) {
     if (shotContext?.remoteIds?.has(remoteHit.remote.id)) {
-      spawnTracer(origin, direction, remoteHit.hit.distance, true, profile);
+      spawnTracer(visualOrigin, direction, remoteHit.hit.distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.remoteIds?.add(remoteHit.remote.id);
     reportPlayerHit(remoteHit.remote, remoteHit.hit, origin, direction, profile);
-    spawnTracer(origin, direction, remoteHit.hit.distance, true, profile);
+    spawnTracer(visualOrigin, direction, remoteHit.hit.distance, true, profile);
     return { blocked: false, hit: true };
   }
 
   if (targetHits.length > 0) {
     const targetIndex = targetHits[0].object.userData.targetIndex;
     if (shotContext?.targetIndexes?.has(targetIndex)) {
-      spawnTracer(origin, direction, targetHits[0].distance, true, profile);
+      spawnTracer(visualOrigin, direction, targetHits[0].distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.targetIndexes?.add(targetIndex);
     const target = targets[targetIndex];
     hitTarget(target, targetHits[0], profile);
-    spawnTracer(origin, direction, targetHits[0].distance, true, profile);
+    spawnTracer(visualOrigin, direction, targetHits[0].distance, true, profile);
     return { blocked: false, hit: true };
   }
 
   if (forgivingHit?.remote) {
     if (shotContext?.remoteIds?.has(forgivingHit.remote.id)) {
-      spawnTracer(origin, direction, forgivingHit.hit.distance, true, profile);
+      spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.remoteIds?.add(forgivingHit.remote.id);
     reportPlayerHit(forgivingHit.remote, forgivingHit.hit, origin, direction, profile);
-    spawnTracer(origin, direction, forgivingHit.hit.distance, true, profile);
+    spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
     return { blocked: false, hit: true };
   }
 
   if (forgivingHit?.target) {
     const targetIndex = getTargetIndex(forgivingHit.target);
     if (shotContext?.targetIndexes?.has(targetIndex)) {
-      spawnTracer(origin, direction, forgivingHit.hit.distance, true, profile);
+      spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
       return { blocked: false, hit: false, duplicate: true };
     }
     shotContext?.targetIndexes?.add(targetIndex);
     hitTarget(forgivingHit.target, forgivingHit.hit, profile);
-    spawnTracer(origin, direction, forgivingHit.hit.distance, true, profile);
+    spawnTracer(visualOrigin, direction, forgivingHit.hit.distance, true, profile);
     return { blocked: false, hit: true };
   }
 
-  spawnTracer(origin, direction, profile.missDistance, false, profile);
+  spawnTracer(visualOrigin, direction, profile.missDistance, false, profile);
   return { blocked: false, hit: false };
+}
+
+function getLocalTracerOrigin(fallback) {
+  if (!weapon?.muzzle) {
+    return fallback;
+  }
+  return weapon.muzzle.getWorldPosition(new THREE.Vector3());
 }
 
 function findForgivingAimHit(origin, direction, profile) {
@@ -2924,7 +2941,7 @@ function updateWeapon(dt, time) {
 
   if (weapon.flashTimer > 0) {
     weapon.flashTimer -= dt;
-    weapon.flash.scale.setScalar(randomRange(0.8, 1.15));
+    weapon.flash.scale.setScalar(weapon.flashBaseScale * randomRange(0.82, 1.16));
     if (weapon.flashTimer <= 0) {
       weapon.flash.visible = false;
     }
@@ -2946,33 +2963,121 @@ function updateEffects(dt, time) {
 }
 
 function spawnTracer(origin, direction, length, hit, profile = null) {
+  const shotLength = Math.max(length, 0.08);
+  if (profile?.style === "lightning") {
+    spawnLightningTracer(origin, direction, shotLength, hit, profile);
+    return;
+  }
+
   const radius = profile?.tracerRadius ?? (hit ? 0.012 : 0.008);
-  const geometry = new THREE.CylinderGeometry(hit ? radius * 1.15 : radius, hit ? radius * 0.38 : radius * 0.36, length, 8);
+  const speed = profile?.tracerSpeed ?? 0;
+  const segmentLength = speed > 0 ? Math.min(shotLength, profile?.tracerLength ?? 3) : shotLength;
+  const fadeTime = profile?.tracerLifetime ?? 0.08;
+  const geometry = new THREE.CylinderGeometry(hit ? radius * 1.15 : radius, hit ? radius * 0.38 : radius * 0.36, segmentLength, 8);
   const material = new THREE.MeshBasicMaterial({
     color: hit ? (profile?.hitColor ?? 0xffdf8a) : (profile?.tracerColor ?? 0x2aa8ff),
     transparent: true,
-    opacity: hit ? 0.78 : 0.44,
+    opacity: hit ? 0.8 : 0.46,
     blending: THREE.AdditiveBlending,
     depthWrite: false
   });
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.copy(origin).addScaledVector(direction, length / 2);
   mesh.quaternion.setFromUnitVectors(WORLD_UP, direction);
+  mesh.position.copy(origin).addScaledVector(direction, speed > 0 ? segmentLength * 0.5 : shotLength / 2);
   scene.add(mesh);
+
+  const travelTime = speed > 0 ? shotLength / Math.max(speed, 0.001) : 0;
+  const duration = speed > 0 ? travelTime + fadeTime : fadeTime;
+  const baseOpacity = hit ? 0.8 : 0.46;
 
   effects.push({
     object: mesh,
     age: 0,
     update(dt) {
       this.age += dt;
-      material.opacity = Math.max(0, (hit ? 0.72 : 0.38) * (1 - this.age / 0.08));
-      if (this.age >= 0.08) {
+      if (speed > 0) {
+        const traveled = Math.min(shotLength, Math.max(segmentLength * 0.35, this.age * speed));
+        const visibleLength = Math.min(segmentLength, traveled, shotLength);
+        const centerDistance = Math.min(shotLength - visibleLength * 0.5, Math.max(visibleLength * 0.5, traveled - visibleLength * 0.5));
+        mesh.scale.y = visibleLength / segmentLength;
+        mesh.position.copy(origin).addScaledVector(direction, centerDistance);
+        const fade = this.age > travelTime ? 1 - (this.age - travelTime) / fadeTime : 1;
+        material.opacity = Math.max(0, baseOpacity * fade);
+      } else {
+        material.opacity = Math.max(0, baseOpacity * (1 - this.age / fadeTime));
+      }
+      if (this.age >= duration) {
         geometry.dispose();
         material.dispose();
         this.done = true;
       }
     }
   });
+}
+
+function spawnLightningTracer(origin, direction, length, hit, profile = null) {
+  const radius = profile?.tracerRadius ?? 0.012;
+  const material = new THREE.MeshBasicMaterial({
+    color: hit ? (profile?.hitColor ?? 0xf1d6ff) : (profile?.tracerColor ?? 0xb465ff),
+    transparent: true,
+    opacity: hit ? 0.78 : 0.5,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const group = new THREE.Group();
+  const right = new THREE.Vector3().crossVectors(direction, WORLD_UP);
+  if (right.lengthSq() < 0.001) {
+    right.set(1, 0, 0);
+  }
+  right.normalize();
+  const up = new THREE.Vector3().crossVectors(right, direction).normalize();
+  const points = [origin.clone()];
+  const segments = 6;
+  const jitter = hit ? 0.2 : 0.34;
+
+  for (let index = 1; index <= segments; index++) {
+    const point = origin.clone().addScaledVector(direction, (length * index) / segments);
+    if (index < segments) {
+      point.addScaledVector(right, randomRange(-jitter, jitter));
+      point.addScaledVector(up, randomRange(-jitter * 0.7, jitter * 0.7));
+    }
+    points.push(point);
+  }
+
+  for (let index = 0; index < points.length - 1; index++) {
+    const mesh = createTracerSegment(points[index], points[index + 1], radius * randomRange(0.8, 1.35), material);
+    group.add(mesh);
+  }
+
+  scene.add(group);
+  const lifetime = profile?.tracerLifetime ?? 0.12;
+  const baseOpacity = material.opacity;
+  effects.push({
+    object: group,
+    age: 0,
+    update(dt) {
+      this.age += dt;
+      material.opacity = Math.max(0, baseOpacity * (1 - this.age / lifetime));
+      if (this.age >= lifetime) {
+        group.traverse((child) => {
+          if (child.isMesh) {
+            child.geometry.dispose();
+          }
+        });
+        material.dispose();
+        this.done = true;
+      }
+    }
+  });
+}
+
+function createTracerSegment(start, end, radius, material) {
+  const delta = end.clone().sub(start);
+  const length = Math.max(delta.length(), 0.001);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.5, length, 7), material);
+  mesh.position.copy(start).add(end).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(WORLD_UP, delta.normalize());
+  return mesh;
 }
 
 function spawnRingBurst(position, material) {

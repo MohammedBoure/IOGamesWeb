@@ -25,7 +25,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.05, -0.04, -0.18],
       localRotation: [0.012, 0.56, -0.12],
       muzzleOffset: [0.02, 0.04, -0.5],
-      fire: { style: "sidearm", auto: false, interval: 0.15, range: 64, damage: 1, spread: 0.0012, recoil: 0.065, pitchKick: 0.0028, yawKick: 0.001, aimAssist: 0.018, hitRadius: 0.135, mobility: 1.08, tracerColor: 0xffd68a, hitColor: 0xfff0b8, missDistance: 38 }
+      fire: { style: "sidearm", auto: false, interval: 0.15, range: 64, damage: 1, spread: 0.0012, recoil: 0.065, pitchKick: 0.0028, yawKick: 0.001, aimAssist: 0.018, hitRadius: 0.135, mobility: 1.08, tracerSpeed: 185, tracerLength: 2.1, tracerRadius: 0.008, tracerLifetime: 0.07, flashScale: 0.92, muzzleIntensity: 10, tracerColor: 0xffd68a, hitColor: 0xfff0b8, missDistance: 38 }
     },
     {
       id: "long-pistol",
@@ -38,7 +38,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.05, -0.08, -0.28],
       localRotation: [0.012, 0.72, -0.12],
       muzzleOffset: [0.02, 0.04, -0.66],
-      fire: { style: "hand-cannon", auto: false, interval: 0.3, range: 82, damage: 2, spread: 0.0009, recoil: 0.24, pitchKick: 0.0078, yawKick: 0.002, aimAssist: 0.018, hitRadius: 0.15, mobility: 1, tracerColor: 0xffa14a, hitColor: 0xffdf8a, tracerRadius: 0.015, missDistance: 52 }
+      fire: { style: "hand-cannon", auto: false, interval: 0.3, range: 82, damage: 2, spread: 0.0009, recoil: 0.24, pitchKick: 0.0078, yawKick: 0.002, aimAssist: 0.018, hitRadius: 0.15, mobility: 1, tracerSpeed: 118, tracerLength: 1.45, tracerRadius: 0.024, tracerLifetime: 0.11, flashScale: 1.5, muzzleIntensity: 18, tracerColor: 0xff8a32, hitColor: 0xffdf8a, missDistance: 52 }
     },
     {
       id: "long-pistol-small",
@@ -51,7 +51,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.05, -0.07, -0.22],
       localRotation: [0.012, 0.62, -0.12],
       muzzleOffset: [0.02, 0.04, -0.56],
-      fire: { style: "quick-burst", auto: true, interval: 0.16, range: 48, damage: 1, spread: 0.0042, projectiles: 2, recoil: 0.11, pitchKick: 0.0038, yawKick: 0.0015, aimAssist: 0.02, hitRadius: 0.16, mobility: 1.05, tracerColor: 0x9fe8ff, hitColor: 0xd8fbff, missDistance: 34 }
+      fire: { style: "quick-burst", auto: true, interval: 0.16, range: 48, damage: 1, spread: 0.0042, projectiles: 2, recoil: 0.11, pitchKick: 0.0038, yawKick: 0.0015, aimAssist: 0.02, hitRadius: 0.16, mobility: 1.05, tracerSpeed: 92, tracerLength: 1.2, tracerRadius: 0.013, tracerLifetime: 0.1, flashScale: 1.12, muzzleIntensity: 13, tracerColor: 0x9fe8ff, hitColor: 0xd8fbff, missDistance: 34 }
     },
     {
       id: "rifle",
@@ -64,7 +64,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.05, -0.1, -0.44],
       localRotation: [0.008, 0.7, -0.095],
       muzzleOffset: [0.03, 0.045, -0.88],
-      fire: { style: "rifle", auto: true, interval: 0.14, range: 82, damage: 1, spread: 0.0025, recoil: 0.105, pitchKick: 0.0042, yawKick: 0.0018, aimAssist: 0.014, hitRadius: 0.115, mobility: 1, tracerColor: 0x64d6ff, hitColor: 0xffdf8a, missDistance: 48 }
+      fire: { style: "rifle", auto: true, interval: 0.14, range: 82, damage: 1, spread: 0.0025, recoil: 0.105, pitchKick: 0.0042, yawKick: 0.0018, aimAssist: 0.014, hitRadius: 0.115, mobility: 1, tracerSpeed: 245, tracerLength: 3.4, tracerRadius: 0.009, tracerLifetime: 0.06, flashScale: 1.02, muzzleIntensity: 12, tracerColor: 0x64d6ff, hitColor: 0xffdf8a, missDistance: 48 }
     },
     {
       id: "sniper-rifle",
@@ -77,7 +77,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.04, -0.1, -0.54],
       localRotation: [0.006, 0.66, -0.085],
       muzzleOffset: [0.03, 0.045, -1.04],
-      fire: { style: "sniper", auto: false, interval: 0.58, range: 132, damage: 3, spread: 0.00025, recoil: 0.42, pitchKick: 0.016, yawKick: 0.003, aimAssist: 0.013, hitRadius: 0.13, mobility: 0.92, tracerColor: 0xf7fbff, hitColor: 0xffffff, tracerRadius: 0.02, missDistance: 92 }
+      fire: { style: "sniper", auto: false, interval: 0.58, range: 132, damage: 3, spread: 0.00025, recoil: 0.42, pitchKick: 0.016, yawKick: 0.003, aimAssist: 0.013, hitRadius: 0.13, mobility: 0.92, tracerSpeed: 0, tracerLength: 132, tracerRadius: 0.022, tracerLifetime: 0.16, flashScale: 1.9, muzzleIntensity: 24, tracerColor: 0xf7fbff, hitColor: 0xffffff, missDistance: 92 }
     },
     {
       id: "ray-gun",
@@ -90,7 +90,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.05, -0.1, -0.3],
       localRotation: [0.012, 0.62, -0.12],
       muzzleOffset: [0.02, 0.045, -0.68],
-      fire: { style: "ray", auto: true, interval: 0.145, range: 72, damage: 1, spread: 0.0004, recoil: 0.03, pitchKick: 0.0018, yawKick: 0.0007, aimAssist: 0.012, hitRadius: 0.105, mobility: 0.98, tracerColor: 0x36ffe2, hitColor: 0x8afff1, tracerRadius: 0.014, missDistance: 58 }
+      fire: { style: "ray", auto: true, interval: 0.145, range: 72, damage: 1, spread: 0.0004, recoil: 0.03, pitchKick: 0.0018, yawKick: 0.0007, aimAssist: 0.012, hitRadius: 0.105, mobility: 0.98, tracerSpeed: 0, tracerLength: 72, tracerRadius: 0.014, tracerLifetime: 0.12, flashScale: 1.08, muzzleIntensity: 16, tracerColor: 0x36ffe2, hitColor: 0x8afff1, missDistance: 58 }
     },
     {
       id: "lightning-gun",
@@ -103,7 +103,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.05, -0.08, -0.28],
       localRotation: [0.012, 0.64, -0.12],
       muzzleOffset: [0.02, 0.045, -0.7],
-      fire: { style: "lightning", auto: true, interval: 0.17, range: 44, damage: 1, spread: 0.008, projectiles: 4, recoil: 0.16, pitchKick: 0.0048, yawKick: 0.0028, aimAssist: 0.02, hitRadius: 0.18, mobility: 0.93, tracerColor: 0xb465ff, hitColor: 0xf1d6ff, tracerRadius: 0.011, missDistance: 34 }
+      fire: { style: "lightning", auto: true, interval: 0.17, range: 44, damage: 1, spread: 0.008, projectiles: 4, recoil: 0.16, pitchKick: 0.0048, yawKick: 0.0028, aimAssist: 0.02, hitRadius: 0.18, mobility: 0.93, tracerSpeed: 0, tracerLength: 44, tracerRadius: 0.013, tracerLifetime: 0.13, flashScale: 1.35, muzzleIntensity: 18, tracerColor: 0xb465ff, hitColor: 0xf1d6ff, missDistance: 34 }
     }
   ].map((weapon, index) => ({
     ...weapon,
