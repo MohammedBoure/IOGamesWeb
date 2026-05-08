@@ -1,8 +1,9 @@
 const basePath = "/assets/games/neon-aim-arena/models";
+const weaponPackPath = `${basePath}/weapons/arena-pack`;
 
 export const neonAimArenaAssets = {
   loadout: {
-    primaryWeaponId: "AR_4"
+    primaryWeaponId: "rifle"
   },
   character: {
     id: "swat",
@@ -13,35 +14,23 @@ export const neonAimArenaAssets = {
     suitability: "Best current fit for the shooter theme and much lighter than the previous Ninja GLB."
   },
   weapons: [
-    "AR_1",
-    "AR_2",
-    "AR_3",
-    "AR_4",
-    "AR_5",
-    "AR_6",
-    "Pistol_1",
-    "Pistol_2",
-    "Pistol_3",
-    "SMG_1",
-    "SMG_2",
-    "Sniper_1",
-    "Sniper_2",
-    "Sniper_3",
-    "Crossbow_1",
-    "Crossbow_2",
-    "Grenade",
-    "Grenade_1",
-    "Grenade_2",
-    "Grenade_3"
-  ].map((id) => ({
-    id,
-    name: id.replace(/_/g, " "),
-    type: id.startsWith("Grenade") ? "throwable" : "weapon",
-    format: "gltf",
-    path: `${basePath}/weapons/low-poly-guns/${id}.gltf`
+    { id: "pistol", name: "Pistol", modelLength: 0.92, remoteLength: 0.74, handLength: 0.72 },
+    { id: "long-pistol", name: "Long Pistol", modelLength: 1.08, remoteLength: 0.88, handLength: 0.84 },
+    { id: "long-pistol-small", name: "Long Pistol Small", modelLength: 0.98, remoteLength: 0.78, handLength: 0.76 },
+    { id: "rifle", name: "Rifle", modelLength: 1.46, remoteLength: 0.98, handLength: 1.08 },
+    { id: "sniper-rifle", name: "Sniper Rifle", modelLength: 1.68, remoteLength: 1.14, handLength: 1.2 },
+    { id: "ray-gun", name: "Ray Gun", modelLength: 1.22, remoteLength: 0.94, handLength: 0.92 },
+    { id: "lightning-gun", name: "Lightning Gun", modelLength: 1.34, remoteLength: 1.0, handLength: 1.02 }
+  ].map((weapon, index) => ({
+    ...weapon,
+    slot: index,
+    type: "weapon",
+    format: "obj",
+    obj: `${weaponPackPath}/${weapon.id}/model.obj`,
+    mtl: `${weaponPackPath}/${weapon.id}/model.mtl`
   })),
   notes: [
-    "The weapon glTF files are self-contained and do not need external textures or .bin files.",
-    "Only runtime-ready assets are kept in the project to avoid consuming space."
+    "The active weapon pack uses runtime-ready OBJ/MTL files only.",
+    "Source FBX and Blend files were removed to avoid consuming project space."
   ]
 };

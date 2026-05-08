@@ -166,7 +166,8 @@ const scorePlayers = new Map();
 const worldModelCache = new Map();
 const keys = new Set();
 const MOVEMENT_KEYS = new Set(["z", "s", "q", "d"]);
-const GAMEPLAY_KEYS = new Set(["z", "s", "q", "d", " ", "control", "ctrl", "x"]);
+const WEAPON_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+const GAMEPLAY_KEYS = new Set(["z", "s", "q", "d", " ", "control", "ctrl", "x", ...WEAPON_KEYS]);
 const DEFAULT_SERVER_URL = runtimeOptions.serverUrl || import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws";
 const DEFAULT_PLAYER_NAME = runtimeOptions.playerName || import.meta.env.VITE_DEFAULT_PLAYER_NAME || "Player";
 const BACKEND_ACCESS_TOKEN = runtimeOptions.accessToken || import.meta.env.VITE_BACKEND_ACCESS_TOKEN || "";
@@ -211,7 +212,8 @@ const state = {
   firing: false,
   toastTimer: 0,
   settingsRequested: false,
-  alive: true
+  alive: true,
+  weaponSlot: 0
 };
 
 const velocity = new THREE.Vector3();
@@ -243,6 +245,7 @@ const localSnapshot = {
   velocity: [0, 0, 0],
   grounded: false,
   bhopChain: 0,
+  weaponSlot: 0,
   animation: "idle",
   alive: true
 };
@@ -1003,25 +1006,22 @@ function chooseAccent(x, z) {
 
 function createRuntimeAssetState(assetConfig = {}) {
   const weapons = Array.isArray(assetConfig?.weapons) ? assetConfig.weapons : [];
-  const preferredWeaponId = assetConfig?.loadout?.primaryWeaponId || assetConfig?.primaryWeaponId || "AR_4";
-  const weaponAsset = (
-    weapons.find((asset) => asset.id === preferredWeaponId) ||
-    weapons.find((asset) => /^AR_/.test(asset.id ?? "")) ||
-    weapons.find((asset) => asset.type === "weapon") ||
-    null
-  );
+  const preferredWeaponId = assetConfig?.loadout?.primaryWeaponId || assetConfig?.primaryWeaponId || "rifle";
+  const weaponAssets = weapons.filter((asset) => asset?.path || asset?.obj);
+  const preferredWeaponIndex = Math.max(0, weaponAssets.findIndex((asset) => asset.id === preferredWeaponId));
 
   return {
-    loader: new GLTFLoader(),
+    gltfLoader: new GLTFLoader(),
     character: createModelEntry(assetConfig?.character, "character"),
-    weapon: createModelEntry(weaponAsset, "weapon")
+    weaponSlot: preferredWeaponIndex,
+    weapons: weaponAssets.map((asset) => createModelEntry(asset, "weapon"))
   };
 }
 
 function createModelEntry(asset, kind) {
   return {
     kind,
-    asset: asset?.path ? asset : null,
+    asset: asset?.path || asset?.obj ? asset : null,
     gltf: null,
     promise: null,
     failed: false
@@ -1029,8 +1029,10 @@ function createModelEntry(asset, kind) {
 }
 
 function loadRuntimeModels() {
-  loadModelEntry(runtimeModels.weapon).then((gltf) => {
-    if (disposed || !gltf) {
+  state.weaponSlot = THREE.MathUtils.clamp(runtimeModels.weaponSlot, 0, Math.max(0, runtimeModels.weapons.length - 1));
+
+  loadModelEntry(getSelectedWeaponEntry()).then((modelSource) => {
+    if (disposed || !modelSource) {
       return;
     }
     mountWeaponModel();
@@ -1038,6 +1040,7 @@ function loadRuntimeModels() {
       mountRemoteWeaponModel(remote);
     }
   });
+  preloadWeaponModels();
 
   loadModelEntry(runtimeModels.character).then((gltf) => {
     if (disposed || !gltf) {
@@ -1050,38 +1053,95 @@ function loadRuntimeModels() {
 }
 
 function loadModelEntry(entry) {
-  if (!entry?.asset?.path) {
+  if (!entry?.asset?.path && !entry?.asset?.obj) {
     return Promise.resolve(null);
   }
   if (entry.gltf) {
     return Promise.resolve(entry.gltf);
   }
   if (!entry.promise) {
-    entry.promise = runtimeModels.loader.loadAsync(entry.asset.path)
-      .then((gltf) => {
-        entry.gltf = gltf;
-        return gltf;
+    entry.promise = loadAssetModel(entry.asset)
+      .then((modelSource) => {
+        entry.gltf = modelSource;
+        return modelSource;
       })
       .catch((error) => {
         entry.failed = true;
-        console.warn(`Could not load ${entry.kind} model: ${entry.asset.path}`, error);
+        console.warn(`Could not load ${entry.kind} model: ${entry.asset.path || entry.asset.obj}`, error);
         return null;
       });
   }
   return entry.promise;
 }
 
+function loadAssetModel(asset) {
+  const format = String(asset?.format || "").toLowerCase();
+  if (format === "obj" || asset?.obj) {
+    return loadObjAsset(asset);
+  }
+  return runtimeModels.gltfLoader.loadAsync(asset.path);
+}
+
+function loadObjAsset(asset) {
+  const objPath = asset.obj || asset.path;
+  if (!asset.mtl) {
+    return new OBJLoader().loadAsync(objPath).then((object) => ({ scene: object, animations: [] }));
+  }
+  return new MTLLoader()
+    .loadAsync(asset.mtl)
+    .then((loadedMaterials) => {
+      loadedMaterials.preload();
+      const loader = new OBJLoader();
+      loader.setMaterials(loadedMaterials);
+      return loader.loadAsync(objPath);
+    })
+    .then((object) => ({ scene: object, animations: [] }));
+}
+
+function preloadWeaponModels() {
+  for (const entry of runtimeModels.weapons) {
+    loadModelEntry(entry);
+  }
+}
+
+function getSelectedWeaponEntry() {
+  return getWeaponEntryForSlot(state.weaponSlot);
+}
+
+function getWeaponEntryForSlot(slot) {
+  if (!runtimeModels.weapons.length) {
+    return null;
+  }
+  const index = THREE.MathUtils.clamp(Number(slot) || 0, 0, runtimeModels.weapons.length - 1);
+  return runtimeModels.weapons[index] ?? runtimeModels.weapons[0] ?? null;
+}
+
+function getSelectedWeaponAsset() {
+  return getSelectedWeaponEntry()?.asset ?? null;
+}
+
+function getWeaponSlotById(weaponId) {
+  return runtimeModels.weapons.findIndex((entry) => entry.asset?.id === weaponId);
+}
+
 function mountWeaponModel() {
-  if (!runtimeModels.weapon.gltf || !weapon.modelMount) {
+  const entry = getSelectedWeaponEntry();
+  if (!entry?.gltf || !weapon.modelMount) {
     return;
   }
-  const model = cloneRuntimeModel(runtimeModels.weapon.gltf);
+  const model = cloneRuntimeModel(entry.gltf);
   prepareRuntimeModel(model);
-  fitWeaponModel(model, LOCAL_WEAPON_MODEL_LENGTH, new THREE.Vector3(0.02, -0.03, -0.09));
+  const asset = entry.asset ?? {};
+  fitWeaponModel(
+    model,
+    asset.modelLength ?? LOCAL_WEAPON_MODEL_LENGTH,
+    new THREE.Vector3(asset.localOffset?.[0] ?? 0.02, asset.localOffset?.[1] ?? -0.03, asset.localOffset?.[2] ?? -0.09)
+  );
   weapon.modelMount.clear();
   weapon.modelMount.add(model);
   weapon.fallbackGroup.visible = false;
   weapon.model = model;
+  weapon.modelEntry = entry;
 }
 
 function mountRemoteCharacterModel(remote) {
@@ -1102,26 +1162,34 @@ function mountRemoteCharacterModel(remote) {
 }
 
 function mountRemoteWeaponModel(remote) {
-  if (remote.kind !== "shooter" || !runtimeModels.weapon.gltf || !remote.weaponMount) {
+  const entry = getWeaponEntryForSlot(remote.weaponSlot);
+  if (remote.kind !== "shooter" || !entry || !remote.weaponMount) {
+    return;
+  }
+  if (!entry.gltf) {
+    loadModelEntry(entry).then((modelSource) => {
+      if (!disposed && modelSource) {
+        mountRemoteWeaponModel(remote);
+      }
+    });
     return;
   }
   const parent = remote.weaponHand || remote.weaponMount;
   const shouldAttachToHand = parent === remote.weaponHand;
-  if (remote.weaponModel && remote.weaponModel.parent === parent) {
+  if (remote.weaponModel && remote.weaponModel.parent === parent && remote.weaponModelEntry === entry) {
     return;
   }
 
-  const model = remote.weaponModel || cloneRuntimeModel(runtimeModels.weapon.gltf);
-  if (!remote.weaponModel) {
-    prepareRuntimeModel(model);
-    remote.weaponModel = model;
-  }
+  remote.weaponModel?.parent?.remove(remote.weaponModel);
+  const model = cloneRuntimeModel(entry.gltf);
+  prepareRuntimeModel(model);
+  remote.weaponModel = model;
+  remote.weaponModelEntry = entry;
 
-  model.parent?.remove(model);
   if (shouldAttachToHand) {
-    fitHandWeaponModel(model);
+    fitHandWeaponModel(model, entry.asset);
   } else {
-    fitWeaponModel(model, REMOTE_WEAPON_MODEL_LENGTH, new THREE.Vector3(0, 0, 0));
+    fitWeaponModel(model, entry.asset?.remoteLength ?? REMOTE_WEAPON_MODEL_LENGTH, new THREE.Vector3(0, 0, 0));
   }
 
   if (!shouldAttachToHand) {
@@ -1171,16 +1239,16 @@ function fitWeaponModel(model, targetLength, offset) {
   model.position.set(0, 0, 0);
   model.rotation.set(0, Math.PI / 2, 0);
   model.scale.setScalar(1);
-  scaleObjectToAxis(model, "z", targetLength);
+  scaleObjectToLongestAxis(model, targetLength);
   centerObject(model, true);
   model.position.add(offset);
 }
 
-function fitHandWeaponModel(model) {
+function fitHandWeaponModel(model, asset = {}) {
   model.position.set(0, 0, 0);
   model.rotation.set(0, 0, Math.PI / 2);
   model.scale.setScalar(1);
-  scaleObjectToAxis(model, "y", REMOTE_HAND_WEAPON_LENGTH);
+  scaleObjectToLongestAxis(model, asset.handLength ?? REMOTE_HAND_WEAPON_LENGTH);
   centerObject(model, true);
   model.position.set(0.02, 0.22, -0.025);
 }
@@ -1198,6 +1266,15 @@ function scaleObjectToAxis(object, axis, targetSize) {
   const box = new THREE.Box3().setFromObject(object);
   const size = box.getSize(new THREE.Vector3());
   const currentSize = Math.max(size[axis], 0.001);
+  object.scale.multiplyScalar(targetSize / currentSize);
+  object.updateMatrixWorld(true);
+}
+
+function scaleObjectToLongestAxis(object, targetSize) {
+  object.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const currentSize = Math.max(size.x, size.y, size.z, 0.001);
   object.scale.multiplyScalar(targetSize / currentSize);
   object.updateMatrixWorld(true);
 }
@@ -1346,6 +1423,44 @@ function createWeapon() {
   };
 }
 
+function selectWeaponSlot(slot, announce = true) {
+  if (state.mode !== GAME_MODES.SHOOTER || !runtimeModels.weapons.length) {
+    return false;
+  }
+  if (slot < 0 || slot >= runtimeModels.weapons.length) {
+    return false;
+  }
+  const nextSlot = slot;
+  const entry = getWeaponEntryForSlot(nextSlot);
+  if (!entry) {
+    return false;
+  }
+
+  state.weaponSlot = nextSlot;
+  localSnapshot.weaponSlot = nextSlot;
+  weapon.model = null;
+  weapon.modelEntry = null;
+  weapon.modelMount.clear();
+  weapon.fallbackGroup.visible = true;
+  weapon.clipPull = 0;
+  state.recoil = 0;
+
+  loadModelEntry(entry).then((modelSource) => {
+    if (disposed || state.weaponSlot !== nextSlot || !modelSource) {
+      return;
+    }
+    mountWeaponModel();
+  });
+
+  if (announce) {
+    showToast(`${nextSlot + 1} - ${entry.asset?.name ?? "Weapon"}`);
+    audio.boost();
+  }
+  updateLocalSnapshot();
+  sendNetworkUpdate(1);
+  return true;
+}
+
 function setupEvents() {
   addEvent(hud.startButton, "click", startGame);
   if (!runtimeOptions.lockMode) {
@@ -1412,14 +1527,18 @@ function setupEvents() {
 
   addEvent(window, "keydown", (event) => {
     const key = normalizeInputKey(event);
+    const weaponSlot = getTopNumberSlot(event);
     if (event.ctrlKey) {
       keys.add("control");
     }
-    if (shouldCaptureKey(event, key)) {
+    if (shouldCaptureKey(event, key) || weaponSlot !== null) {
       event.preventDefault();
       event.stopPropagation();
     }
     keys.add(key);
+    if (weaponSlot !== null && state.running && !event.repeat) {
+      selectWeaponSlot(weaponSlot);
+    }
     if (state.mode === GAME_MODES.SHOOTER && key === " ") {
       state.jumpQueued = true;
     }
@@ -2296,7 +2415,7 @@ function shoot() {
   sendNetworkAction("shoot", {
     origin: [round4(origin.x), round4(origin.y), round4(origin.z)],
     direction: [round4(tempVec3.x), round4(tempVec3.y), round4(tempVec3.z)],
-    weapon: "rifle",
+    weapon: getSelectedWeaponAsset()?.id ?? "weapon",
     client_time: round4(clock.elapsedTime)
   });
   const hitObjects = targets.filter((target) => target.alive).flatMap((target) => [target.body, target.core]);
@@ -2606,6 +2725,7 @@ function updateLocalSnapshot() {
     localSnapshot.velocity[2] = Number(race.velocity.y.toFixed(3));
     localSnapshot.grounded = true;
     localSnapshot.bhopChain = 0;
+    localSnapshot.weaponSlot = 0;
     localSnapshot.animation = race.drift > 0.18 ? "drift" : race.speed > 1 ? "drive" : "idle";
     localSnapshot.alive = true;
     return;
@@ -2621,6 +2741,7 @@ function updateLocalSnapshot() {
   localSnapshot.velocity[2] = Number(velocity.z.toFixed(3));
   localSnapshot.grounded = state.grounded;
   localSnapshot.bhopChain = state.bhopChain;
+  localSnapshot.weaponSlot = state.weaponSlot;
   localSnapshot.animation = getLocalAnimationState();
   localSnapshot.alive = state.alive;
 }
@@ -2660,6 +2781,7 @@ function getLocalSnapshot() {
     velocity: [...localSnapshot.velocity],
     grounded: localSnapshot.grounded,
     bhopChain: localSnapshot.bhopChain,
+    weaponSlot: localSnapshot.weaponSlot,
     animation: localSnapshot.animation,
     alive: localSnapshot.alive
   };
@@ -3250,6 +3372,7 @@ function createRemotePlayer(playerInfo) {
     airborneBlend: 0,
     shootTimer: 0,
     weaponKick: 0,
+    weaponSlot: 0,
     weaponHand: null,
     weaponAttachedToHand: false,
     weaponBasePosition: new THREE.Vector3(),
@@ -3259,7 +3382,8 @@ function createRemotePlayer(playerInfo) {
     mixer: null,
     animation: null,
     characterModel: null,
-    weaponModel: null
+    weaponModel: null,
+    weaponModelEntry: null
   };
 
   mountRemoteCharacterModel(remote);
@@ -3343,6 +3467,14 @@ function updateRemotePlayerState(playerId, remoteState) {
     const velocityZ = Number(remoteState.velocity[2]) || 0;
     remote.targetSpeed = Math.hypot(velocityX, velocityZ);
     remote.targetVerticalVelocity = velocityY;
+  }
+
+  if (Number.isFinite(remoteState.weaponSlot) && runtimeModels.weapons.length) {
+    const nextSlot = THREE.MathUtils.clamp(Math.trunc(remoteState.weaponSlot), 0, runtimeModels.weapons.length - 1);
+    if (nextSlot !== remote.weaponSlot) {
+      remote.weaponSlot = nextSlot;
+      mountRemoteWeaponModel(remote);
+    }
   }
 
   remote.lastSeen = performance.now();
@@ -3524,6 +3656,11 @@ function drawRemoteAction(payload, playerId = null) {
   if (playerId) {
     const remote = remotePlayers.get(playerId);
     if (remote) {
+      const weaponSlot = getWeaponSlotById(payload.weapon);
+      if (weaponSlot >= 0 && weaponSlot !== remote.weaponSlot) {
+        remote.weaponSlot = weaponSlot;
+        mountRemoteWeaponModel(remote);
+      }
       triggerRemoteShoot(remote);
     }
   }
@@ -3745,6 +3882,13 @@ function cameraForwardFlat() {
 
 function isCtrlHeld() {
   return keys.has("control") || keys.has("ctrl");
+}
+
+function getTopNumberSlot(event) {
+  if (!/^Digit[1-9]$/.test(event.code)) {
+    return null;
+  }
+  return Number(event.code.slice(5)) - 1;
 }
 
 function normalizeInputKey(event) {

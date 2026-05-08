@@ -115,6 +115,7 @@ ws://127.0.0.1:8000/ws
 - `S`: backward
 - `Q`: left
 - `D`: right
+- `1`-`7`: switch weapons from the top number row
 - `Space`: jump
 - `Ctrl + Mouse Wheel Up`: precision bunnyhop
 - `Ctrl + Mouse Wheel Down`: power slide on the ground, air tuck while airborne
