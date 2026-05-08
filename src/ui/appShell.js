@@ -46,6 +46,18 @@ const GAME_VIEW_HTML = `
 
     <div id="combatFeed" class="combat-feed" aria-live="polite"></div>
 
+    <div id="matchPanel" class="match-panel">
+      <span id="matchStateValue">Warmup</span>
+      <strong id="matchTimerValue">03:00</strong>
+      <small id="matchGoalValue">First to 8</small>
+    </div>
+
+    <div id="healthPanel" class="health-panel">
+      <span>HP</span>
+      <div class="health-track"><i id="healthBar"></i></div>
+      <strong id="healthValue">5/5</strong>
+    </div>
+
     <div id="weaponPanel" class="weapon-panel">
       <div class="weapon-panel-head">
         <span id="weaponSlotLabel">1</span>
@@ -90,6 +102,12 @@ const GAME_VIEW_HTML = `
     </div>
 
     <div id="statusToast" class="status-toast"></div>
+    <div id="pickupNotice" class="pickup-notice"></div>
+    <div id="damageVignette" class="damage-vignette"></div>
+    <div id="respawnOverlay" class="respawn-overlay">
+      <strong id="respawnTitle">Respawning</strong>
+      <span id="respawnTimer">1.0</span>
+    </div>
   </div>
 
   <section id="startScreen" class="overlay active">
@@ -154,6 +172,18 @@ const GAME_VIEW_HTML = `
         <span>Sensitivity</span>
         <input id="sensitivitySlider" type="range" min="0.5" max="2.2" step="0.05" value="1" />
       </label>
+    </div>
+  </section>
+
+  <section id="matchEndScreen" class="overlay match-end-screen">
+    <div class="modal small">
+      <p class="eyebrow">ROUND COMPLETE</p>
+      <h2 id="matchEndTitle">Round Complete</h2>
+      <p id="matchEndBrief" class="brief">Nice run.</p>
+      <div class="menu-actions">
+        <button id="rematchButton" class="primary-button" type="button">Rematch</button>
+        <button id="leaveMatchButton" class="ghost-button" type="button">Back to Games</button>
+      </div>
     </div>
   </section>
 `;

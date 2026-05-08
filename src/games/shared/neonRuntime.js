@@ -56,6 +56,23 @@ const hud = {
   scoreRows: document.querySelector("#scoreRows"),
   crosshair: document.querySelector(".crosshair"),
   combatFeed: document.querySelector("#combatFeed"),
+  matchPanel: document.querySelector("#matchPanel"),
+  matchStateValue: document.querySelector("#matchStateValue"),
+  matchTimerValue: document.querySelector("#matchTimerValue"),
+  matchGoalValue: document.querySelector("#matchGoalValue"),
+  healthPanel: document.querySelector("#healthPanel"),
+  healthBar: document.querySelector("#healthBar"),
+  healthValue: document.querySelector("#healthValue"),
+  pickupNotice: document.querySelector("#pickupNotice"),
+  damageVignette: document.querySelector("#damageVignette"),
+  respawnOverlay: document.querySelector("#respawnOverlay"),
+  respawnTitle: document.querySelector("#respawnTitle"),
+  respawnTimer: document.querySelector("#respawnTimer"),
+  matchEnd: document.querySelector("#matchEndScreen"),
+  matchEndTitle: document.querySelector("#matchEndTitle"),
+  matchEndBrief: document.querySelector("#matchEndBrief"),
+  rematchButton: document.querySelector("#rematchButton"),
+  leaveMatchButton: document.querySelector("#leaveMatchButton"),
   weaponPanel: document.querySelector("#weaponPanel"),
   weaponSlotLabel: document.querySelector("#weaponSlotLabel"),
   weaponNameValue: document.querySelector("#weaponNameValue"),
@@ -106,6 +123,12 @@ const CROUCH_HEIGHT = 1.18;
 const SLIDE_HEIGHT = 0.98;
 const TARGET_COUNT = 9;
 const FIRE_INTERVAL = 0.105;
+const MATCH_COUNTDOWN_SECONDS = 3;
+const MATCH_DURATION_SECONDS = 180;
+const MATCH_SCORE_LIMIT = 8;
+const LOCAL_MAX_HEALTH = 5;
+const RESPAWN_DELAY_SECONDS = 1;
+const PICKUP_RESPAWN_SECONDS = 14;
 const GAME_MODES = {
   SHOOTER: "shooter",
   RACING: "racing"
@@ -169,10 +192,12 @@ const materials = createMaterials();
 const shooterWorld = new THREE.Group();
 const colliders = [];
 const targets = [];
+const pickups = [];
 const effects = [];
 const raceCheckpoints = [];
 const remotePlayers = new Map();
 const scorePlayers = new Map();
+let scoreboardSignature = "";
 const worldModelCache = new Map();
 const keys = new Set();
 const MOVEMENT_KEYS = new Set(["z", "s", "q", "d"]);
@@ -223,6 +248,17 @@ const state = {
   toastTimer: 0,
   settingsRequested: false,
   alive: true,
+  localHealth: LOCAL_MAX_HEALTH,
+  localMaxHealth: LOCAL_MAX_HEALTH,
+  localScore: 0,
+  localDeaths: 0,
+  localDamageDealt: 0,
+  matchPhase: "warmup",
+  countdownTimer: MATCH_COUNTDOWN_SECONDS,
+  matchTimer: MATCH_DURATION_SECONDS,
+  respawnTimer: 0,
+  damageFlash: 0,
+  pickupNoticeTimer: 0,
   weaponSlot: 0,
   weaponSwitchTimer: 0
 };
@@ -342,6 +378,7 @@ function setupWorld() {
   addArenaShell();
   addMovementGeometry();
   addTargetLanes();
+  addArenaPickups();
   addAmbientMarkers();
   addShooterWorldProps();
 }
@@ -999,6 +1036,136 @@ function addSpeedPad(x, z, direction) {
       }
     }
   });
+}
+
+function addArenaPickups() {
+  const placements = [
+    { type: "health", x: -13, z: 20 },
+    { type: "health", x: 14, z: -20 },
+    { type: "ammo", x: -32, z: -12 },
+    { type: "ammo", x: 32, z: 14 },
+    { type: "boost", x: 0, z: -31 },
+    { type: "boost", x: 0, z: 31 }
+  ];
+
+  for (const placement of placements) {
+    pickups.push(createPickup(placement.type, placement.x, placement.z));
+  }
+}
+
+function createPickup(type, x, z) {
+  const group = new THREE.Group();
+  group.position.set(x, 0.52, z);
+  shooterWorld.add(group);
+
+  const material = getPickupMaterial(type);
+  const core = type === "ammo"
+    ? new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.34, 0.54), material)
+    : new THREE.Mesh(new THREE.OctahedronGeometry(0.42, 0), material);
+  core.castShadow = true;
+  group.add(core);
+
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.035, 8, 36), material.clone());
+  ring.rotation.x = Math.PI / 2;
+  group.add(ring);
+
+  const glow = new THREE.PointLight(material.color.getHex(), 1.1, 5.2, 2);
+  glow.position.y = 0.2;
+  group.add(glow);
+
+  return {
+    type,
+    group,
+    core,
+    ring,
+    glow,
+    active: true,
+    respawnTimer: 0,
+    phase: Math.random() * Math.PI * 2
+  };
+}
+
+function getPickupMaterial(type) {
+  const source = type === "health"
+    ? materials.accentGreen
+    : type === "ammo" ? materials.accentAmber : materials.accentBlue;
+  return source.clone();
+}
+
+function updatePickups(dt, time) {
+  for (const pickup of pickups) {
+    if (!pickup.active) {
+      pickup.respawnTimer -= dt;
+      if (pickup.respawnTimer <= 0) {
+        pickup.active = true;
+        pickup.group.visible = true;
+      }
+      continue;
+    }
+
+    pickup.group.rotation.y += dt * 1.35;
+    pickup.core.position.y = Math.sin(time * 2.2 + pickup.phase) * 0.08;
+    pickup.ring.rotation.z += dt * 1.8;
+    pickup.glow.intensity = 0.8 + Math.sin(time * 4 + pickup.phase) * 0.18;
+
+    if (state.running && state.matchPhase === "playing" && state.alive && horizontalDistance(player.position, pickup.group.position) < 1.15) {
+      tryCollectPickup(pickup);
+    }
+  }
+}
+
+function tryCollectPickup(pickup) {
+  let collected = false;
+  if (pickup.type === "health") {
+    if (!network.matchId) {
+      const wasHurt = state.localHealth < state.localMaxHealth;
+      state.localHealth = Math.min(state.localMaxHealth, state.localHealth + 2);
+      if (!wasHurt) {
+        state.stamina = Math.min(100, state.stamina + 18);
+      }
+      state.damageFlash = 0;
+      showPickupNotice(wasHurt ? "Health +2" : "Health reserve");
+      collected = true;
+    }
+  } else if (pickup.type === "ammo") {
+    if (!network.matchId) {
+      const profile = getSelectedWeaponProfile();
+      const weaponState = getWeaponRuntimeState(profile);
+      if (weaponState.ammo < profile.magazine || weaponState.reloadTimer > 0) {
+        weaponState.ammo = profile.magazine;
+        weaponState.reloadTimer = 0;
+        showPickupNotice(`${profile.name} ammo`);
+        collected = true;
+      }
+    }
+  } else if (pickup.type === "boost") {
+    const direction = cameraForwardFlat();
+    velocity.x += direction.x * 2.8;
+    velocity.z += direction.z * 2.8;
+    state.stamina = Math.min(100, state.stamina + 34);
+    state.motionKick = Math.max(state.motionKick, 0.08);
+    showPickupNotice("Momentum boost");
+    collected = true;
+  }
+
+  if (!collected) {
+    return;
+  }
+
+  pickup.active = false;
+  pickup.group.visible = false;
+  pickup.respawnTimer = PICKUP_RESPAWN_SECONDS;
+  spawnRingBurst(pickup.group.position, pickup.core.material);
+  audio.boost();
+  updateHud();
+}
+
+function resetPickups() {
+  for (const pickup of pickups) {
+    pickup.active = true;
+    pickup.respawnTimer = 0;
+    pickup.group.visible = true;
+  }
 }
 
 function addBox(x, y, z, width, height, depth, material, solid = false) {
@@ -1668,6 +1835,8 @@ function setupEvents() {
   }
   addEvent(hud.resumeButton, "click", resumeGame);
   addEvent(hud.restartButton, "click", () => restartGame(true));
+  addEvent(hud.rematchButton, "click", () => restartGame(true));
+  addEvent(hud.leaveMatchButton, "click", exitToMenu);
   addEvent(hud.connectButton, "click", () => connectNetwork());
   addEvent(hud.createMatchButton, "click", () => createNetworkMatch());
   addEvent(hud.joinMatchButton, "click", () => joinNetworkMatch(getMatchIdInput()));
@@ -1813,9 +1982,12 @@ function startGame() {
   applyGameMode();
   if (state.mode === GAME_MODES.RACING) {
     resetRace();
+  } else {
+    startShooterCountdown();
   }
   hud.start.classList.remove("active");
   hud.pause.classList.remove("active");
+  hud.matchEnd?.classList.remove("active");
   renderer.domElement.requestPointerLock();
 }
 
@@ -1861,6 +2033,9 @@ function applyGameMode() {
   weapon.group.visible = state.mode === GAME_MODES.SHOOTER;
   shooterWorld.visible = state.mode === GAME_MODES.SHOOTER;
   race.world.visible = state.mode === GAME_MODES.RACING;
+  if (state.mode === GAME_MODES.RACING) {
+    hud.matchEnd?.classList.remove("active");
+  }
   for (const target of targets) {
     target.group.visible = state.mode === GAME_MODES.SHOOTER && target.alive;
   }
@@ -1921,11 +2096,22 @@ function resetRound(lockPointer) {
   state.fireTimer = 0;
   state.weaponSwitchTimer = 0;
   resetWeaponInventory();
+  state.localHealth = state.localMaxHealth;
+  state.localScore = 0;
+  state.localDeaths = 0;
+  state.localDamageDealt = 0;
+  state.matchPhase = "warmup";
+  state.countdownTimer = MATCH_COUNTDOWN_SECONDS;
+  state.matchTimer = MATCH_DURATION_SECONDS;
+  state.respawnTimer = 0;
+  state.damageFlash = 0;
+  state.pickupNoticeTimer = 0;
   state.verticalVelocity = 0;
   state.coyote = 0;
   state.grounded = false;
   state.paused = false;
   state.alive = true;
+  resetPickups();
 
   targets.forEach((target, index) => {
     target.alive = true;
@@ -1935,12 +2121,14 @@ function resetRound(lockPointer) {
   });
 
   hud.pause.classList.remove("active");
-  showToast("Deathmatch base");
+  hud.matchEnd?.classList.remove("active");
+  showToast("Ready");
   updateHud();
 
   if (lockPointer) {
     audio.resume();
     state.running = true;
+    startShooterCountdown();
     hud.start.classList.remove("active");
     renderer.domElement.requestPointerLock();
   }
@@ -1965,6 +2153,7 @@ function resetRace() {
   player.rotation.set(0, 0, 0);
   pitch.rotation.set(0, 0, 0);
   pitch.position.set(0, 0, 0);
+  hud.matchEnd?.classList.remove("active");
   updateRaceCamera(0.016);
   updateHud();
 }
@@ -2167,12 +2356,14 @@ function exitToMenu() {
   state.paused = false;
   state.settingsRequested = false;
   state.alive = true;
+  state.matchPhase = "warmup";
   keys.clear();
   velocity.set(0, 0, 0);
   state.verticalVelocity = 0;
   state.firing = false;
   resetMotionTech();
   hud.pause.classList.remove("active");
+  hud.matchEnd?.classList.remove("active");
   hud.start.classList.add("active");
   showToast("Exit");
   if (document.pointerLockElement) {
@@ -2205,6 +2396,97 @@ function animate() {
   renderer.render(scene, camera);
 }
 
+function startShooterCountdown() {
+  state.matchPhase = "countdown";
+  state.countdownTimer = MATCH_COUNTDOWN_SECONDS;
+  state.matchTimer = MATCH_DURATION_SECONDS;
+  state.respawnTimer = 0;
+  state.damageFlash = 0;
+  hud.matchEnd?.classList.remove("active");
+  showToast("Get ready");
+}
+
+function updateShooterMatchFlow(dt) {
+  state.damageFlash = Math.max(0, state.damageFlash - dt * 1.9);
+  state.pickupNoticeTimer = Math.max(0, state.pickupNoticeTimer - dt);
+  state.respawnTimer = Math.max(0, state.respawnTimer - dt);
+
+  if (state.matchPhase === "countdown") {
+    state.countdownTimer -= dt;
+    if (state.countdownTimer <= 0) {
+      state.matchPhase = "playing";
+      state.matchTimer = MATCH_DURATION_SECONDS;
+      showToast("Fight");
+      audio.boost();
+    }
+    return false;
+  }
+
+  if (state.matchPhase === "finished") {
+    return false;
+  }
+
+  if (state.matchPhase !== "playing") {
+    return true;
+  }
+
+  state.matchTimer = Math.max(0, state.matchTimer - dt);
+  if (state.matchTimer <= 0) {
+    finishShooterMatch("time");
+    return false;
+  }
+
+  const leader = getCurrentScoreLeader();
+  if (leader && leader.kills >= MATCH_SCORE_LIMIT) {
+    finishShooterMatch("score", leader);
+    return false;
+  }
+
+  return true;
+}
+
+function finishShooterMatch(reason = "time", leader = null) {
+  if (state.matchPhase === "finished") {
+    return;
+  }
+  const winner = leader ?? getCurrentScoreLeader();
+  const localWon = winner?.id === (network.clientId || "local");
+  state.matchPhase = "finished";
+  state.firing = false;
+  state.paused = true;
+  clearGameplayInput();
+
+  if (document.pointerLockElement === renderer.domElement) {
+    document.exitPointerLock();
+  }
+
+  const title = localWon ? "Victory" : winner ? `${winner.name ?? "Player"} Wins` : "Round Complete";
+  const detail = reason === "score"
+    ? `Score limit reached: ${winner?.kills ?? MATCH_SCORE_LIMIT}/${MATCH_SCORE_LIMIT}.`
+    : `Time expired. Top score: ${winner?.kills ?? state.localScore}.`;
+  if (hud.matchEndTitle) {
+    hud.matchEndTitle.textContent = title;
+  }
+  if (hud.matchEndBrief) {
+    hud.matchEndBrief.textContent = detail;
+  }
+  if (hud.rematchButton) {
+    hud.rematchButton.textContent = network.matchId ? "Restart Locally" : "Rematch";
+  }
+  hud.matchEnd?.classList.add("active");
+  addCombatFeed(detail, localWon ? "kill" : "hit");
+  audio.finish();
+  updateHud();
+}
+
+function getCurrentScoreLeader() {
+  const entries = getScoreboardEntries();
+  if (!entries.length) {
+    return null;
+  }
+  return entries[0];
+}
+
 function updateGame(dt, time) {
   if (state.mode === GAME_MODES.RACING) {
     updateRace(dt, time);
@@ -2216,6 +2498,7 @@ function updateGame(dt, time) {
 
   state.fireTimer = Math.max(0, state.fireTimer - dt);
   updateWeaponInventory(dt);
+  updatePickups(dt, time);
   state.bhopBuffer = Math.max(0, state.bhopBuffer - dt);
   state.fastSlideBuffer = Math.max(0, state.fastSlideBuffer - dt);
   state.slideTimer = Math.max(0, state.slideTimer - dt);
@@ -2228,6 +2511,16 @@ function updateGame(dt, time) {
   state.motionKick = THREE.MathUtils.damp(state.motionKick, 0, 9, dt);
   state.motionRoll = THREE.MathUtils.damp(state.motionRoll, 0, 8, dt);
   state.stamina = Math.min(100, state.stamina + dt * (state.grounded ? 9 : 5));
+
+  if (!updateShooterMatchFlow(dt)) {
+    velocity.set(0, 0, 0);
+    state.verticalVelocity = 0;
+    state.firing = false;
+    updateLocalSnapshot();
+    sendNetworkUpdate(dt);
+    updateHud();
+    return;
+  }
 
   if (!state.alive) {
     velocity.set(0, 0, 0);
@@ -2596,7 +2889,7 @@ function resolvePlayerCollisions() {
 }
 
 function shoot() {
-  if (!state.running || state.paused || !state.alive || state.fireTimer > 0) {
+  if (!state.running || state.paused || state.matchPhase !== "playing" || !state.alive || state.fireTimer > 0) {
     return;
   }
 
@@ -2811,7 +3104,9 @@ function resolveWeaponShot(origin, direction, profile, shotContext = null) {
 
   if (worldHitDistance !== null && worldHitDistance <= nearestDamageDistance) {
     spawnShotTracer(visualOrigin, origin, direction, worldHitDistance, true, profile);
-    spawnRingBurst(origin.clone().addScaledVector(direction, worldHitDistance), materials.platformDark);
+    const impactPoint = origin.clone().addScaledVector(direction, worldHitDistance);
+    spawnRingBurst(impactPoint, materials.platformDark);
+    spawnImpactSparks(impactPoint, profile?.tracerColor ?? 0x2aa8ff, 1);
     return { blocked: true, hit: false };
   }
 
@@ -2970,11 +3265,17 @@ function hitTarget(target, hit, profile = null) {
   target.alive = false;
   target.group.visible = false;
   target.respawn = randomRange(0.28, 0.58);
+  state.localScore += 1;
+  state.localDamageDealt += profile?.damage ?? 1;
   state.stamina = Math.min(100, state.stamina + 6 + (profile?.damage ?? 1) * 2);
 
   spawnRingBurst(hit.point, materials.targetBody);
+  spawnImpactSparks(hit.point, profile?.hitColor ?? 0xffdf8a, profile?.damage ?? 1);
   showToast(profile ? `${profile.name} hit` : "Hit");
   audio.hit();
+  if (!network.matchId && state.localScore >= MATCH_SCORE_LIMIT) {
+    finishShooterMatch("score", getCurrentScoreLeader());
+  }
 }
 
 function getTargetIndex(target) {
@@ -3027,8 +3328,10 @@ function intersectWorldColliders(origin, direction, maxDistance) {
 
 function reportPlayerHit(remote, hit, origin, direction, profile = null) {
   remote.pendingHit = performance.now();
+  state.localDamageDealt += profile?.damage ?? 1;
   state.stamina = Math.min(100, state.stamina + 8 + (profile?.damage ?? 1) * 3);
   spawnRingBurst(hit.point, materials.targetBody);
+  spawnImpactSparks(hit.point, profile?.hitColor ?? 0xffdf8a, profile?.damage ?? 1);
   showPulseMarker("hit");
   audio.hit();
   sendNetwork({
@@ -3295,6 +3598,59 @@ function spawnRingBurst(position, material) {
   });
 }
 
+function spawnImpactSparks(position, color = 0xffdf8a, intensity = 1) {
+  const count = THREE.MathUtils.clamp(5 + Math.round(intensity * 2), 5, 14);
+  const group = new THREE.Group();
+  group.position.copy(position);
+  scene.add(group);
+
+  const geometry = new THREE.BoxGeometry(0.035, 0.035, 0.22);
+  const material = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.82,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const sparks = [];
+
+  for (let index = 0; index < count; index++) {
+    const spark = new THREE.Mesh(geometry, material);
+    const direction = new THREE.Vector3(
+      randomRange(-1, 1),
+      randomRange(0.2, 1.2),
+      randomRange(-1, 1)
+    ).normalize();
+    spark.quaternion.setFromUnitVectors(WORLD_UP, direction);
+    spark.scale.setScalar(randomRange(0.65, 1.4));
+    group.add(spark);
+    sparks.push({
+      mesh: spark,
+      velocity: direction.multiplyScalar(randomRange(1.8, 4.6) + intensity * 0.35)
+    });
+  }
+
+  effects.push({
+    object: group,
+    age: 0,
+    update(dt) {
+      this.age += dt;
+      const fade = Math.max(0, 1 - this.age / 0.42);
+      material.opacity = 0.82 * fade;
+      for (const spark of sparks) {
+        spark.velocity.y -= 5.8 * dt;
+        spark.mesh.position.addScaledVector(spark.velocity, dt);
+        spark.mesh.scale.setScalar(Math.max(0.1, fade));
+      }
+      if (this.age >= 0.42) {
+        geometry.dispose();
+        material.dispose();
+        this.done = true;
+      }
+    }
+  });
+}
+
 function getWeaponCollisionPull() {
   const origin = camera.getWorldPosition(tempVec3).clone();
   const direction = cameraForwardFlat();
@@ -3357,8 +3713,85 @@ function updateHud() {
   hud.pulseBar.style.transform = `scaleX(${THREE.MathUtils.clamp(state.bhopChain / 12, 0, 1)})`;
   hud.pulseValue.textContent = `${state.bhopChain}x`;
   hud.speedValue.textContent = String(speed);
+  updateMatchHud();
+  updateHealthHud();
   updateWeaponHud();
   updateCrosshair(speed);
+  updateScoreboard();
+}
+
+function updateMatchHud() {
+  if (hud.matchPanel) {
+    hud.matchPanel.dataset.phase = state.matchPhase;
+  }
+  if (hud.matchStateValue) {
+    hud.matchStateValue.textContent = state.matchPhase === "countdown"
+      ? "Starting"
+      : state.matchPhase === "playing" ? "Live"
+        : state.matchPhase === "finished" ? "Finished" : "Warmup";
+  }
+  if (hud.matchTimerValue) {
+    hud.matchTimerValue.textContent = state.matchPhase === "countdown"
+      ? Math.max(1, Math.ceil(state.countdownTimer)).toString()
+      : formatMatchTime(state.matchTimer);
+  }
+  if (hud.matchGoalValue) {
+    const leader = getCurrentScoreLeader();
+    const leaderText = leader ? `${leader.name ?? "Player"} ${leader.kills ?? 0}` : `${state.localScore}`;
+    hud.matchGoalValue.textContent = `First to ${MATCH_SCORE_LIMIT} | Lead ${leaderText}`;
+  }
+  if (hud.pickupNotice) {
+    hud.pickupNotice.classList.toggle("active", state.pickupNoticeTimer > 0);
+  }
+}
+
+function updateHealthHud() {
+  const health = getLocalHealthInfo();
+  const ratio = health.max > 0 ? THREE.MathUtils.clamp(health.current / health.max, 0, 1) : 0;
+  if (hud.healthBar) {
+    hud.healthBar.style.transform = `scaleX(${ratio.toFixed(3)})`;
+  }
+  if (hud.healthValue) {
+    hud.healthValue.textContent = `${health.current}/${health.max}`;
+  }
+  if (hud.damageVignette) {
+    hud.damageVignette.style.opacity = String(THREE.MathUtils.clamp(state.damageFlash, 0, 0.82));
+  }
+  if (hud.respawnOverlay) {
+    const active = !state.alive || state.respawnTimer > 0;
+    hud.respawnOverlay.classList.toggle("active", active);
+  }
+  if (hud.respawnTimer) {
+    hud.respawnTimer.textContent = state.respawnTimer > 0 ? state.respawnTimer.toFixed(1) : "0.0";
+  }
+}
+
+function getLocalHealthInfo() {
+  const localPlayer = network.clientId ? scorePlayers.get(network.clientId) : null;
+  const maxHealth = localPlayer?.max_health ?? state.localMaxHealth;
+  const currentHealth = localPlayer
+    ? (localPlayer.alive === false ? 0 : localPlayer.health ?? maxHealth)
+    : state.localHealth;
+  return {
+    current: Math.max(0, Math.round(currentHealth)),
+    max: Math.max(1, Math.round(maxHealth))
+  };
+}
+
+function formatMatchTime(seconds) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function showPickupNotice(text) {
+  if (!hud.pickupNotice) {
+    return;
+  }
+  hud.pickupNotice.textContent = text;
+  state.pickupNoticeTimer = 1.35;
+  hud.pickupNotice.classList.add("active");
 }
 
 function updateWeaponHud() {
@@ -3773,7 +4206,7 @@ function syncMatchState(match) {
 
   const seen = new Set();
   for (const playerInfo of match.players ?? []) {
-    if (playerInfo.id === network.clientId) {
+    if (playerInfo.id === (network.clientId || "local")) {
       applyLocalPlayerInfo(playerInfo);
       continue;
     }
@@ -3792,6 +4225,9 @@ function handlePlayerDamaged(message) {
   const damage = Number.isFinite(Number(message.damage)) ? Number(message.damage) : null;
   const damageText = damage ? ` -${damage}` : "";
   if (message.victim_id === network.clientId) {
+    state.localHealth = Number.isFinite(Number(message.health)) ? Number(message.health) : state.localHealth;
+    state.localMaxHealth = Number.isFinite(Number(message.max_health)) ? Number(message.max_health) : state.localMaxHealth;
+    state.damageFlash = Math.min(0.82, state.damageFlash + 0.5);
     showPulseMarker("damage");
     addCombatFeed(`${message.attacker_name ?? "Player"}${damageText}`, "damage");
     showToast(`Hit${damageText} - HP ${message.health}/${message.max_health}`);
@@ -3811,6 +4247,7 @@ function handlePlayerDamaged(message) {
 function handlePlayerKilled(message) {
   if (message.victim_id === network.clientId) {
     setLocalAlive(false);
+    state.damageFlash = 0.82;
     showPulseMarker("damage");
     addCombatFeed(`${message.killer_name ?? "Player"} eliminated you`, "damage");
     showToast(`Killed by ${message.killer_name ?? "Player"} - respawn 1s`);
@@ -3857,6 +4294,12 @@ function handlePlayerRespawned(message) {
 }
 
 function applyLocalPlayerInfo(playerInfo) {
+  if (Number.isFinite(Number(playerInfo.health))) {
+    state.localHealth = Number(playerInfo.health);
+  }
+  if (Number.isFinite(Number(playerInfo.max_health))) {
+    state.localMaxHealth = Number(playerInfo.max_health);
+  }
   const isAlive = playerInfo.alive !== false;
   if (!isAlive && state.alive) {
     setLocalAlive(false);
@@ -3869,6 +4312,11 @@ function setLocalAlive(alive) {
   state.alive = alive;
   localSnapshot.alive = alive;
   if (!alive) {
+    state.localHealth = 0;
+    state.respawnTimer = RESPAWN_DELAY_SECONDS;
+    if (!network.matchId) {
+      state.localDeaths += 1;
+    }
     clearGameplayInput();
     velocity.set(0, 0, 0);
     state.firing = false;
@@ -3889,6 +4337,9 @@ function respawnLocalPlayer(remoteState = null) {
   state.fireTimer = 0;
   state.weaponSwitchTimer = 0;
   resetWeaponInventory();
+  state.localHealth = state.localMaxHealth;
+  state.respawnTimer = 0;
+  state.damageFlash = 0;
   state.recoil = 0;
   state.firing = false;
   state.alive = true;
@@ -4322,6 +4773,33 @@ function clearRemotePlayers() {
   }
 }
 
+function getScoreboardEntries() {
+  const entries = [...scorePlayers.values()];
+  if (!entries.length || !network.matchId) {
+    const health = getLocalHealthInfo();
+    entries.push({
+      id: network.clientId || "local",
+      name: getPlayerNameInput() || "Player",
+      kills: state.localScore,
+      deaths: state.localDeaths,
+      health: health.current,
+      max_health: health.max,
+      alive: state.alive
+    });
+  }
+  return entries.sort((a, b) => {
+    const killDelta = (b.kills ?? 0) - (a.kills ?? 0);
+    if (killDelta !== 0) {
+      return killDelta;
+    }
+    const deathDelta = (a.deaths ?? 0) - (b.deaths ?? 0);
+    if (deathDelta !== 0) {
+      return deathDelta;
+    }
+    return String(a.name ?? "").localeCompare(String(b.name ?? ""));
+  });
+}
+
 function updateScoreboard(players = null) {
   if (Array.isArray(players)) {
     scorePlayers.clear();
@@ -4336,18 +4814,23 @@ function updateScoreboard(players = null) {
     return;
   }
 
+  const entries = getScoreboardEntries();
+  const nextSignature = entries
+    .map((playerInfo) => [
+      playerInfo.id,
+      playerInfo.name,
+      playerInfo.kills ?? 0,
+      playerInfo.deaths ?? 0,
+      playerInfo.health ?? 0,
+      playerInfo.max_health ?? 0,
+      playerInfo.alive === false ? 0 : 1
+    ].join(":"))
+    .join("|");
+  if (nextSignature === scoreboardSignature) {
+    return;
+  }
+  scoreboardSignature = nextSignature;
   hud.scoreRows.replaceChildren();
-  const entries = [...scorePlayers.values()].sort((a, b) => {
-    const killDelta = (b.kills ?? 0) - (a.kills ?? 0);
-    if (killDelta !== 0) {
-      return killDelta;
-    }
-    const deathDelta = (a.deaths ?? 0) - (b.deaths ?? 0);
-    if (deathDelta !== 0) {
-      return deathDelta;
-    }
-    return String(a.name ?? "").localeCompare(String(b.name ?? ""));
-  });
 
   if (entries.length === 0) {
     const empty = document.createElement("div");
@@ -4380,6 +4863,7 @@ function updateScoreboard(players = null) {
 
 function clearScoreboard() {
   scorePlayers.clear();
+  scoreboardSignature = "";
   updateScoreboard([]);
 }
 
