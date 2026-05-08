@@ -1,12 +1,13 @@
 # IOGamesWeb
 
-Scalable online web games. The current build includes **Neon Aim Arena**, a 3D browser game built with Vite and Three.js, plus a FastAPI/WebSocket backend for players and matches.
+Scalable online web games. The current build includes **Neon Aim Arena**, **Neon Race Circuit**, and **Chess Arena**, plus a FastAPI/WebSocket backend for players and matches.
 
 ## Current Features
 
 - Browser-based 3D gameplay.
 - Fast shooter movement and aiming.
 - A racing mode in the same arena runtime.
+- Isolated Chess Arena game with legal moves, roles, and move history.
 - WebSocket multiplayer.
 - Create a match or join an existing match.
 - Simple 6-digit Match IDs.

@@ -113,6 +113,20 @@ Send a shot:
 }
 ```
 
+Send a chess move:
+
+```json
+{
+  "type": "chess_move",
+  "from": "e2",
+  "to": "e4",
+  "promotion": "",
+  "san": "e4",
+  "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+  "status": "playing"
+}
+```
+
 Other messages:
 
 ```json
@@ -120,6 +134,8 @@ Other messages:
 { "type": "leave_match" }
 { "type": "set_ready", "ready": true }
 { "type": "start_match" }
+{ "type": "chess_resign" }
+{ "type": "chess_reset" }
 { "type": "ping" }
 ```
 

@@ -77,6 +77,7 @@ class Match:
     finish_reason: str | None = None
     started_at_monotonic: float | None = None
     ends_at_monotonic: float | None = None
+    game_state: JsonDict = field(default_factory=dict)
 
 
 class MatchManager:
@@ -174,6 +175,12 @@ class MatchManager:
             await self.player_update(player_id, payload)
         elif message_type == "player_hit":
             await self.player_hit(player_id, payload)
+        elif message_type == "chess_move":
+            await self.chess_move(player_id, payload)
+        elif message_type == "chess_resign":
+            await self.chess_resign(player_id)
+        elif message_type == "chess_reset":
+            await self.chess_reset(player_id)
         elif message_type in {"shoot", "player_action"}:
             await self.player_action(player_id, payload)
         else:
@@ -183,7 +190,8 @@ class MatchManager:
         settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
         match_mode = sanitize_mode(settings.get("mode", "deathmatch"))
         map_name = sanitize_mode(settings.get("map", "aim_arena"))
-        max_players = clamp_int(settings.get("max_players", 12), 2, 24)
+        max_players_limit = 2 if match_mode == "chess" else 24
+        max_players = clamp_int(settings.get("max_players", 12), 2, max_players_limit)
         duration_seconds = clamp_int(
             settings.get("duration_seconds", settings.get("duration", DEFAULT_MATCH_DURATION_SECONDS)),
             60,
@@ -211,6 +219,9 @@ class MatchManager:
             player.match_id = match.id
             player.ready = False
             reset_combat_player(player)
+            if match.mode == "chess":
+                initialize_chess_state(match)
+                sync_chess_roles(match, self._players)
             self._matches[match.id] = match
             match_state = self._public_match_state_locked(match.id)
             events.append(({player_id}, {"type": "match_created", "match": match_state}))
@@ -252,6 +263,9 @@ class MatchManager:
                 player.match_id = match.id
                 player.ready = False
                 reset_combat_player(player)
+
+            if match.mode == "chess":
+                sync_chess_roles(match, self._players)
 
             match_state = self._public_match_state_locked(match.id)
             others = set(match.players) - {player_id}
@@ -300,7 +314,12 @@ class MatchManager:
             match = self._matches[player.match_id]
             if match.host_id != player_id:
                 raise ClientMessageError("not_host", "Only the host can start the match.")
-            self._start_match_round_locked(match)
+            if match.mode == "chess":
+                initialize_chess_state(match)
+                sync_chess_roles(match, self._players)
+                match.status = "playing" if len(match.players) >= 2 else "lobby"
+            else:
+                self._start_match_round_locked(match)
             events = self._match_state_events_locked(match.id)
             events.append((set(self._players), {"type": "lobby_matches", "matches": self._public_matches_locked()}))
             match_id = match.id
@@ -471,6 +490,142 @@ class MatchManager:
 
         await self._send_many(recipients, message)
 
+    async def chess_move(self, player_id: str, payload: JsonDict) -> None:
+        async with self._lock:
+            player = self._require_player_locked(player_id)
+            if not player.match_id:
+                raise ClientMessageError("not_in_match", "Player is not in a match.")
+            match = self._matches[player.match_id]
+            if match.mode != "chess":
+                raise ClientMessageError("invalid_mode", "This match is not a chess game.")
+            sync_chess_roles(match, self._players)
+            state = match.game_state
+            role = state.get("roles", {}).get(player_id)
+            if role not in {"w", "b"}:
+                raise ClientMessageError("chess_observer", "Only seated chess players can move.")
+            if match.status != "playing":
+                raise ClientMessageError("match_not_playing", "Chess game is not currently playing.")
+            if state.get("turn") != role:
+                raise ClientMessageError("not_your_turn", "It is not your turn.")
+
+            move = clean_chess_move(payload)
+            state["fen"] = move["fen"]
+            state["pgn"] = sanitize_chess_text(payload.get("pgn"), 4000)
+            state["turn"] = "b" if role == "w" else "w"
+            state["last_move"] = move
+            state["ply"] = clamp_int(state.get("ply", 0), 0, 10000) + 1
+            moves = state.get("moves") if isinstance(state.get("moves"), list) else []
+            moves.append(move)
+            state["moves"] = moves[-160:]
+
+            status = sanitize_chess_status(payload.get("status"))
+            result = sanitize_chess_text(payload.get("result"), 32)
+            if status != "playing":
+                state["status"] = status
+                state["result"] = result or chess_result_for_status(status, role)
+                match.status = "finished"
+                match.finished_at = utc_now()
+                match.winner_id = player_id if status == "checkmate" else None
+                match.finish_reason = status
+            else:
+                state["status"] = "playing"
+                state["result"] = ""
+
+            match_state = self._public_match_state_locked(match.id)
+            recipients = set(match.players)
+            events = [
+                (
+                    recipients,
+                    {
+                        "type": "chess_state",
+                        "player_id": player_id,
+                        "move": move,
+                        "state": state,
+                        "match": match_state,
+                        "server_time": utc_now(),
+                    },
+                ),
+                (recipients, {"type": "match_state", "match": match_state}),
+            ]
+            if match.status == "finished":
+                events.append((set(self._players), {"type": "lobby_matches", "matches": self._public_matches_locked()}))
+
+        await self._flush(events)
+
+    async def chess_resign(self, player_id: str) -> None:
+        async with self._lock:
+            player = self._require_player_locked(player_id)
+            if not player.match_id:
+                raise ClientMessageError("not_in_match", "Player is not in a match.")
+            match = self._matches[player.match_id]
+            if match.mode != "chess":
+                raise ClientMessageError("invalid_mode", "This match is not a chess game.")
+            sync_chess_roles(match, self._players)
+            state = match.game_state
+            role = state.get("roles", {}).get(player_id)
+            if role not in {"w", "b"}:
+                raise ClientMessageError("chess_observer", "Only seated chess players can resign.")
+            winner_role = "b" if role == "w" else "w"
+            winner_id = next((pid for pid, seat in state.get("roles", {}).items() if seat == winner_role), None)
+            state["status"] = "resigned"
+            state["result"] = "0-1" if winner_role == "b" else "1-0"
+            match.status = "finished"
+            match.finished_at = utc_now()
+            match.winner_id = winner_id
+            match.finish_reason = "resign"
+            match_state = self._public_match_state_locked(match.id)
+            recipients = set(match.players)
+            events = [
+                (
+                    recipients,
+                    {
+                        "type": "chess_state",
+                        "player_id": player_id,
+                        "state": state,
+                        "match": match_state,
+                        "server_time": utc_now(),
+                    },
+                ),
+                (recipients, {"type": "match_state", "match": match_state}),
+                (set(self._players), {"type": "lobby_matches", "matches": self._public_matches_locked()}),
+            ]
+
+        await self._flush(events)
+
+    async def chess_reset(self, player_id: str) -> None:
+        async with self._lock:
+            player = self._require_player_locked(player_id)
+            if not player.match_id:
+                raise ClientMessageError("not_in_match", "Player is not in a match.")
+            match = self._matches[player.match_id]
+            if match.mode != "chess":
+                raise ClientMessageError("invalid_mode", "This match is not a chess game.")
+            if match.host_id != player_id:
+                raise ClientMessageError("not_host", "Only the host can reset the chess game.")
+            initialize_chess_state(match)
+            sync_chess_roles(match, self._players)
+            match.status = "playing" if len(match.players) >= 2 else "lobby"
+            match.finished_at = None
+            match.winner_id = None
+            match.finish_reason = None
+            match_state = self._public_match_state_locked(match.id)
+            recipients = set(match.players)
+            events = [
+                (
+                    recipients,
+                    {
+                        "type": "chess_state",
+                        "player_id": player_id,
+                        "state": match.game_state,
+                        "match": match_state,
+                        "server_time": utc_now(),
+                    },
+                ),
+                (recipients, {"type": "match_state", "match": match_state}),
+            ]
+
+        await self._flush(events)
+
     async def _respawn_player_after(self, player_id: str, match_id: str) -> None:
         await asyncio.sleep(RESPAWN_DELAY_SECONDS)
         async with self._lock:
@@ -531,6 +686,10 @@ class MatchManager:
             return events
 
         match.players.discard(player_id)
+        if match.mode == "chess":
+            roles = match.game_state.get("roles") if isinstance(match.game_state.get("roles"), dict) else {}
+            roles.pop(player_id, None)
+            match.game_state["roles"] = roles
         if not match.players:
             self._cancel_match_finish_locked(match.id)
             match.status = "lobby"
@@ -538,6 +697,8 @@ class MatchManager:
 
         if match.host_id == player_id:
             match.host_id = sorted(match.players)[0]
+        if match.mode == "chess":
+            sync_chess_roles(match, self._players)
 
         match_state = self._public_match_state_locked(match.id)
         recipients = set(match.players)
@@ -671,6 +832,7 @@ class MatchManager:
             "finished_at": match.finished_at,
             "winner_id": match.winner_id,
             "finish_reason": match.finish_reason,
+            "game_state": match.game_state,
             "created_at": match.created_at,
             "players": [
                 self._public_player(self._players[player_id])
@@ -764,6 +926,97 @@ def reset_combat_player(player: Player) -> None:
     player.ready = False
     player.state.update(spawn_state(player))
     reset_weapon_state(player)
+
+
+def initialize_chess_state(match: Match) -> None:
+    existing_roles = match.game_state.get("roles") if isinstance(match.game_state.get("roles"), dict) else {}
+    match.game_state = {
+        "fen": "start",
+        "pgn": "",
+        "turn": "w",
+        "status": "waiting",
+        "result": "",
+        "ply": 0,
+        "moves": [],
+        "last_move": None,
+        "roles": {player_id: role for player_id, role in existing_roles.items() if player_id in match.players},
+    }
+
+
+def sync_chess_roles(match: Match, players: dict[str, Player]) -> None:
+    if not match.game_state:
+        initialize_chess_state(match)
+
+    roles = match.game_state.get("roles") if isinstance(match.game_state.get("roles"), dict) else {}
+    roles = {
+        player_id: role
+        for player_id, role in roles.items()
+        if player_id in match.players and role in {"w", "b"}
+    }
+    seated_roles = set(roles.values())
+    for player_id in sorted(match.players):
+        if player_id not in players or player_id in roles:
+            continue
+        if "w" not in seated_roles:
+            roles[player_id] = "w"
+            seated_roles.add("w")
+        elif "b" not in seated_roles:
+            roles[player_id] = "b"
+            seated_roles.add("b")
+
+    match.game_state["roles"] = roles
+    if len(roles) >= 2 and match.game_state.get("status") == "waiting":
+        match.game_state["status"] = "playing"
+        match.status = "playing"
+        match.started_at = match.started_at or utc_now()
+    elif len(roles) < 2 and match.status != "finished":
+        match.game_state["status"] = "waiting"
+        match.status = "lobby"
+
+
+def clean_chess_move(payload: JsonDict) -> JsonDict:
+    from_square = sanitize_square(require_string(payload, "from"))
+    to_square = sanitize_square(require_string(payload, "to"))
+    fen = sanitize_chess_text(require_string(payload, "fen"), 160)
+    if fen == "start":
+        raise ClientMessageError("invalid_fen", "FEN must describe the board after the move.")
+    promotion = str(payload.get("promotion", "")).lower()
+    if promotion not in {"", "q", "r", "b", "n"}:
+        raise ClientMessageError("invalid_promotion", "Invalid chess promotion piece.")
+    return {
+        "from": from_square,
+        "to": to_square,
+        "promotion": promotion,
+        "san": sanitize_chess_text(payload.get("san"), 32),
+        "lan": sanitize_chess_text(payload.get("lan"), 16),
+        "fen": fen,
+    }
+
+
+def sanitize_square(value: str) -> str:
+    value = str(value or "").strip().lower()
+    if not re.fullmatch(r"[a-h][1-8]", value):
+        raise ClientMessageError("invalid_square", "Chess squares must use algebraic coordinates.")
+    return value
+
+
+def sanitize_chess_status(value: Any) -> str:
+    value = str(value or "playing").strip().lower()
+    if value in {"playing", "checkmate", "draw", "stalemate", "insufficient", "threefold", "resigned"}:
+        return value
+    return "playing"
+
+
+def sanitize_chess_text(value: Any, max_length: int) -> str:
+    return str(value or "").replace("\x00", "").strip()[:max_length]
+
+
+def chess_result_for_status(status: str, moving_role: str) -> str:
+    if status == "checkmate":
+        return "1-0" if moving_role == "w" else "0-1"
+    if status in {"draw", "stalemate", "insufficient", "threefold"}:
+        return "1/2-1/2"
+    return ""
 
 
 def reset_weapon_state(player: Player) -> None:

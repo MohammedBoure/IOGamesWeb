@@ -188,6 +188,8 @@ const GAME_VIEW_HTML = `
   </section>
 `;
 
+const SIMPLE_GAME_VIEW_HTML = `<div id="game"></div>`;
+
 export function createArcadeApp(root) {
   if (!root) {
     throw new Error("App root element not found.");
@@ -434,11 +436,12 @@ export function createArcadeApp(root) {
     }
 
     document.body.dataset.screen = "game";
+    const gameViewHtml = selectedGame.usesArcadeHud === false ? SIMPLE_GAME_VIEW_HTML : GAME_VIEW_HTML;
     root.innerHTML = `
       <section class="game-shell" aria-label="${escapeHtml(selectedGame.title)}">
         <button id="backToGamesButton" class="back-to-games" type="button">Back to Games</button>
         <div id="gameLoadStatus" class="game-load-status">Loading ${escapeHtml(selectedGame.title)}...</div>
-        ${GAME_VIEW_HTML}
+        ${gameViewHtml}
       </section>
     `;
 
@@ -783,7 +786,7 @@ function createBackendRoom({ serverUrl, playerName, accessToken, game }) {
           settings: {
             mode: game.roomMode || (game.mode === "racing" ? "racing" : "deathmatch"),
             map: game.map || (game.mode === "racing" ? "neon_circuit" : "aim_arena"),
-            max_players: 12,
+            max_players: game.maxPlayers || 12,
             duration_seconds: 180,
             score_limit: 8
           }
