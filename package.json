@@ -11,7 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "three": "latest"
+    "three": "latest",
+    "tone": "^15.1.22"
   },
   "devDependencies": {
     "playwright": "^1.59.1",

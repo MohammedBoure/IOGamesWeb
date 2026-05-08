@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import * as Tone from "tone";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
@@ -4828,18 +4829,160 @@ function createSkyTexture() {
 }
 
 function createAudioSystem() {
-  const noop = () => {};
+  let nodes = null;
+  let startPromise = null;
+
+  function resume() {
+    if (!startPromise) {
+      startPromise = Tone.start()
+        .then(() => {
+          ensureNodes();
+        })
+        .catch(() => null);
+    } else {
+      Tone.start().catch(() => null);
+    }
+    return startPromise;
+  }
+
+  function ensureNodes() {
+    if (nodes) {
+      return nodes;
+    }
+
+    const master = new Tone.Gain(0.72).toDestination();
+    const thump = new Tone.MembraneSynth({
+      pitchDecay: 0.055,
+      octaves: 5.5,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.04 }
+    }).connect(master);
+    const click = new Tone.Synth({
+      oscillator: { type: "square" },
+      envelope: { attack: 0.001, decay: 0.045, sustain: 0, release: 0.012 }
+    }).connect(master);
+    const bright = new Tone.Synth({
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.001, decay: 0.075, sustain: 0, release: 0.025 }
+    }).connect(master);
+    const ray = new Tone.FMSynth({
+      harmonicity: 2.2,
+      modulationIndex: 10,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.035 },
+      modulation: { type: "square" },
+      modulationEnvelope: { attack: 0.001, decay: 0.07, sustain: 0, release: 0.02 }
+    }).connect(master);
+    const noiseFilter = new Tone.Filter(840, "lowpass").connect(master);
+    const noise = new Tone.NoiseSynth({
+      noise: { type: "white" },
+      envelope: { attack: 0.001, decay: 0.11, sustain: 0, release: 0.035 }
+    }).connect(noiseFilter);
+    const sparkFilter = new Tone.Filter(2600, "highpass").connect(master);
+    const spark = new Tone.NoiseSynth({
+      noise: { type: "pink" },
+      envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.02 }
+    }).connect(sparkFilter);
+    nodes = { master, thump, click, bright, ray, noise, noiseFilter, spark };
+    return nodes;
+  }
+
+  function play(callback) {
+    try {
+      resume();
+      callback(ensureNodes(), Tone.now());
+    } catch {
+      // Keep gameplay silent instead of risking runtime errors if audio is blocked.
+    }
+  }
+
+  function shoot(profile = {}) {
+    play((audioNodes, now) => {
+      switch (profile.style) {
+        case "sidearm":
+          audioNodes.click.triggerAttackRelease("G4", 0.035, now, 0.5);
+          audioNodes.thump.triggerAttackRelease("C2", 0.07, now, 0.34);
+          break;
+        case "hand-cannon":
+          audioNodes.noiseFilter.frequency.setValueAtTime(620, now);
+          audioNodes.noise.triggerAttackRelease(0.07, now, 0.56);
+          audioNodes.thump.triggerAttackRelease("A0", 0.16, now, 0.75);
+          audioNodes.click.triggerAttackRelease("C4", 0.04, now + 0.012, 0.32);
+          break;
+        case "shotgun":
+          audioNodes.noiseFilter.frequency.setValueAtTime(720, now);
+          audioNodes.noise.triggerAttackRelease(0.13, now, 0.82);
+          audioNodes.thump.triggerAttackRelease("G0", 0.18, now, 0.86);
+          audioNodes.click.triggerAttackRelease("D3", 0.035, now + 0.02, 0.25);
+          break;
+        case "sniper":
+          audioNodes.spark.triggerAttackRelease(0.045, now, 0.42);
+          audioNodes.thump.triggerAttackRelease("F0", 0.22, now, 0.96);
+          audioNodes.bright.triggerAttackRelease("B5", 0.04, now + 0.018, 0.25);
+          break;
+        case "ray":
+          audioNodes.ray.triggerAttackRelease("C5", 0.09, now, 0.42);
+          audioNodes.bright.triggerAttackRelease("G5", 0.055, now + 0.012, 0.22);
+          break;
+        case "lightning":
+          audioNodes.spark.triggerAttackRelease(0.06, now, 0.64);
+          audioNodes.ray.triggerAttackRelease("A4", 0.07, now, 0.36);
+          audioNodes.click.triggerAttackRelease("F5", 0.025, now + 0.018, 0.26);
+          break;
+        default:
+          audioNodes.click.triggerAttackRelease("E4", 0.035, now, 0.45);
+          audioNodes.thump.triggerAttackRelease("C2", 0.06, now, 0.28);
+          break;
+      }
+    });
+  }
+
   return {
-    resume: noop,
-    shoot: noop,
-    reload: noop,
-    reloadReady: noop,
-    hit: noop,
-    miss: noop,
-    jump: noop,
-    bhop: noop,
-    boost: noop,
-    finish: noop
+    resume,
+    shoot,
+    reload(profile = {}) {
+      play((audioNodes, now) => {
+        const low = profile.style === "sniper" || profile.style === "shotgun" ? "C2" : "E3";
+        audioNodes.click.triggerAttackRelease(low, 0.035, now, 0.26);
+        audioNodes.click.triggerAttackRelease("A3", 0.03, now + 0.12, 0.2);
+      });
+    },
+    reloadReady() {
+      play((audioNodes, now) => {
+        audioNodes.bright.triggerAttackRelease("C6", 0.045, now, 0.24);
+      });
+    },
+    hit() {
+      play((audioNodes, now) => {
+        audioNodes.bright.triggerAttackRelease("A5", 0.05, now, 0.36);
+      });
+    },
+    miss() {
+      play((audioNodes, now) => {
+        audioNodes.click.triggerAttackRelease("A2", 0.025, now, 0.14);
+      });
+    },
+    jump() {
+      play((audioNodes, now) => {
+        audioNodes.bright.triggerAttackRelease("D4", 0.06, now, 0.18);
+      });
+    },
+    bhop() {
+      play((audioNodes, now) => {
+        audioNodes.bright.triggerAttackRelease("G4", 0.05, now, 0.22);
+      });
+    },
+    boost() {
+      play((audioNodes, now) => {
+        audioNodes.ray.triggerAttackRelease("E4", 0.08, now, 0.2);
+      });
+    },
+    finish() {
+      play((audioNodes, now) => {
+        audioNodes.bright.triggerAttackRelease("C5", 0.07, now, 0.28);
+        audioNodes.bright.triggerAttackRelease("G5", 0.09, now + 0.1, 0.28);
+      });
+    }
   };
 }
 
