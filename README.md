@@ -32,18 +32,25 @@ Important values:
 
 ```env
 VITE_WS_URL=ws://127.0.0.1:8000/ws
+VITE_BACKEND_ACCESS_TOKEN=change-me-local-dev-token
 BACKEND_HOST=127.0.0.1
 BACKEND_PORT=8000
 BACKEND_CORS_ORIGINS=*
+BACKEND_ACCESS_TOKEN=change-me-local-dev-token
 ```
 
 Use a secure WebSocket URL in production:
 
 ```env
 VITE_WS_URL=wss://your-backend-domain.com/ws
+VITE_BACKEND_ACCESS_TOKEN=replace-with-the-same-production-token
 BACKEND_CORS_ORIGINS=https://your-frontend-domain.com
 BACKEND_RELOAD=false
+BACKEND_ACCESS_TOKEN=replace-with-the-same-production-token
 ```
+
+`VITE_BACKEND_ACCESS_TOKEN` and `BACKEND_ACCESS_TOKEN` must match. Vite embeds `VITE_` values in browser JavaScript, so this token is a client access key, not a private server secret.
+If `BACKEND_ACCESS_TOKEN` is missing, protected backend routes and WebSocket connections are rejected.
 
 ## Frontend
 
@@ -61,7 +68,7 @@ npm run build
 npm run preview
 ```
 
-Vite embeds `VITE_` variables at build time, so rebuild after changing `VITE_WS_URL`.
+Vite embeds `VITE_` variables at build time, so rebuild after changing `VITE_WS_URL` or `VITE_BACKEND_ACCESS_TOKEN`.
 
 ## Frontend Structure
 

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 
@@ -64,12 +65,19 @@ logger = logging.getLogger("neon_aim.backend")
 
 CORS_ORIGINS = list_from_env("BACKEND_CORS_ORIGINS", "*")
 CORS_ALLOW_CREDENTIALS = bool_from_env("BACKEND_CORS_ALLOW_CREDENTIALS", False)
+BACKEND_ACCESS_TOKEN = os.getenv("BACKEND_ACCESS_TOKEN", "").strip()
+ACCESS_TOKEN_CONFIGURED = bool(BACKEND_ACCESS_TOKEN)
 
 app = FastAPI(
     title=os.getenv("BACKEND_APP_TITLE", "Neon Aim Arena Backend"),
     version=os.getenv("BACKEND_APP_VERSION", "0.1.0"),
 )
-logger.info("backend started log_file=%s cors_origins=%s", LOG_FILE, CORS_ORIGINS)
+logger.info(
+    "backend started log_file=%s cors_origins=%s access_token_configured=%s",
+    LOG_FILE,
+    CORS_ORIGINS,
+    ACCESS_TOKEN_CONFIGURED,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,6 +88,18 @@ app.add_middleware(
 )
 
 manager = MatchManager()
+
+
+def is_access_token_valid(token: str | None) -> bool:
+    return bool(BACKEND_ACCESS_TOKEN) and bool(token) and secrets.compare_digest(token, BACKEND_ACCESS_TOKEN)
+
+
+def require_access_token(
+    header_token: str | None = Header(default=None, alias="X-Backend-Access-Token"),
+    query_token: str | None = Query(default=None, alias="access_token"),
+) -> None:
+    if not is_access_token_valid(header_token or query_token):
+        raise HTTPException(status_code=403, detail="Invalid backend access token.")
 
 
 @app.middleware("http")
@@ -108,7 +128,7 @@ async def health() -> dict:
     }
 
 
-@app.get("/matches")
+@app.get("/matches", dependencies=[Depends(require_access_token)])
 async def matches() -> dict:
     return {"matches": manager.public_matches()}
 
@@ -118,8 +138,14 @@ async def websocket_endpoint(
     websocket: WebSocket,
     player_name: str = Query(default="Player", min_length=1, max_length=32),
     player_id: str | None = Query(default=None, min_length=1, max_length=64),
+    access_token: str | None = Query(default=None),
 ) -> None:
     client_host = websocket.client.host if websocket.client else "unknown"
+    if not is_access_token_valid(access_token):
+        logger.warning("websocket rejected invalid_access_token client=%s", client_host)
+        await websocket.close(code=1008, reason="Invalid backend access token.")
+        return
+
     logger.info(
         "websocket opening player_name=%s requested_player_id=%s client=%s",
         player_name,

@@ -34,6 +34,7 @@ BACKEND_CORS_ORIGINS=*
 BACKEND_CORS_ALLOW_CREDENTIALS=false
 BACKEND_APP_TITLE=Neon Aim Arena Backend
 BACKEND_APP_VERSION=0.1.0
+BACKEND_ACCESS_TOKEN=change-me-local-dev-token
 ```
 
 In production, set CORS to the frontend origin only:
@@ -42,6 +43,7 @@ In production, set CORS to the frontend origin only:
 BACKEND_HOST=0.0.0.0
 BACKEND_RELOAD=false
 BACKEND_CORS_ORIGINS=https://your-frontend-domain.com
+BACKEND_ACCESS_TOKEN=replace-with-the-same-production-token
 ```
 
 If your host provides a `PORT` variable, `backend/run.py` can use it automatically when `BACKEND_PORT` is not set.
@@ -51,8 +53,10 @@ If your host provides a `PORT` variable, `backend/run.py` can use it automatical
 ```text
 GET http://127.0.0.1:8000/health
 GET http://127.0.0.1:8000/matches
-WS  ws://127.0.0.1:8000/ws?player_name=Player
+WS  ws://127.0.0.1:8000/ws?player_name=Player&access_token=change-me-local-dev-token
 ```
+
+`/matches` requires `X-Backend-Access-Token` or an `access_token` query parameter. WebSocket clients must send `access_token` in the query string. If `BACKEND_ACCESS_TOKEN` is missing, protected backend routes and WebSocket connections are rejected.
 
 ## WebSocket Messages
 

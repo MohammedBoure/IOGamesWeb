@@ -5,6 +5,7 @@ const runtimeOptions = {
   mode: "shooter",
   playerName: import.meta.env.VITE_DEFAULT_PLAYER_NAME || "Player",
   serverUrl: import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws",
+  accessToken: import.meta.env.VITE_BACKEND_ACCESS_TOKEN || "",
   matchId: "",
   roomAction: null,
   lockMode: true,
@@ -147,6 +148,7 @@ const MOVEMENT_KEYS = new Set(["z", "s", "q", "d"]);
 const GAMEPLAY_KEYS = new Set(["z", "s", "q", "d", " ", "control", "ctrl", "x"]);
 const DEFAULT_SERVER_URL = runtimeOptions.serverUrl || import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws";
 const DEFAULT_PLAYER_NAME = runtimeOptions.playerName || import.meta.env.VITE_DEFAULT_PLAYER_NAME || "Player";
+const BACKEND_ACCESS_TOKEN = runtimeOptions.accessToken || import.meta.env.VITE_BACKEND_ACCESS_TOKEN || "";
 const EMPTY_SESSION_LABEL = "No session";
 const startCopy = {
   title: hud.startTitle?.textContent ?? "",
@@ -1929,7 +1931,8 @@ function connectNetwork(afterConnect = null) {
 
   const serverUrl = getServerUrlInput();
   const playerName = getPlayerNameInput();
-  const url = appendQuery(serverUrl, "player_name", playerName);
+  let url = appendQuery(serverUrl, "player_name", playerName);
+  url = appendAccessToken(url, BACKEND_ACCESS_TOKEN);
   network.connecting = true;
   network.afterConnect = afterConnect;
   setServerUrlInput(serverUrl);
@@ -2793,6 +2796,14 @@ function updateSettingsPanel() {
 function appendQuery(url, key, value) {
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+}
+
+function appendAccessToken(url, accessToken) {
+  const cleanToken = String(accessToken || "").trim();
+  if (!cleanToken) {
+    return url;
+  }
+  return appendQuery(url, "access_token", cleanToken);
 }
 
 function getHorizontalSpeed() {

@@ -7,6 +7,7 @@ import {
 
 const DEFAULT_PLAYER_NAME = import.meta.env.VITE_DEFAULT_PLAYER_NAME || "Player";
 const DEFAULT_SERVER_URL = import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws";
+const BACKEND_ACCESS_TOKEN = import.meta.env.VITE_BACKEND_ACCESS_TOKEN || "";
 
 const GAME_VIEW_HTML = `
   <div id="game"></div>
@@ -258,6 +259,7 @@ export function createArcadeApp(root) {
       createdRoomLease = await createBackendRoom({
         serverUrl,
         playerName,
+        accessToken: BACKEND_ACCESS_TOKEN,
         game: selectedGame
       });
       showCreatedRoomDialog(createdRoomLease.match.id);
@@ -318,6 +320,7 @@ export function createArcadeApp(root) {
         root: root.querySelector("#game"),
         playerName: sanitizePlayerName(playerName, DEFAULT_PLAYER_NAME),
         serverUrl,
+        accessToken: BACKEND_ACCESS_TOKEN,
         matchId,
         roomAction,
         autoStart: roomAction === "join"
@@ -419,9 +422,10 @@ export function createArcadeApp(root) {
   };
 }
 
-function createBackendRoom({ serverUrl, playerName, game }) {
+function createBackendRoom({ serverUrl, playerName, accessToken, game }) {
   return new Promise((resolve, reject) => {
-    const url = appendQuery(normalizeWebSocketUrl(serverUrl), "player_name", playerName);
+    let url = appendQuery(normalizeWebSocketUrl(serverUrl), "player_name", playerName);
+    url = appendAccessToken(url, accessToken);
     let settled = false;
     let socket = null;
     const timeoutId = window.setTimeout(() => {
@@ -504,6 +508,14 @@ function createBackendRoom({ serverUrl, playerName, game }) {
 function appendQuery(url, key, value) {
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+}
+
+function appendAccessToken(url, accessToken) {
+  const cleanToken = String(accessToken || "").trim();
+  if (!cleanToken) {
+    return url;
+  }
+  return appendQuery(url, "access_token", cleanToken);
 }
 
 function normalizeWebSocketUrl(value) {
