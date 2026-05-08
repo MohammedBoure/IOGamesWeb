@@ -19,7 +19,7 @@ WEAPON_DAMAGE: dict[str, int] = {
     "long-pistol": 2,
     "long-pistol-small": 3,
     "rifle": 1,
-    "sniper-rifle": 3,
+    "sniper-rifle": 5,
     "ray-gun": 1,
     "lightning-gun": 1,
 }

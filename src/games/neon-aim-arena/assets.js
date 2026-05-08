@@ -77,7 +77,7 @@ export const neonAimArenaAssets = {
       localOffset: [0.04, -0.1, -0.54],
       localRotation: [0.006, 0.66, -0.085],
       muzzleOffset: [0.03, 0.045, -1.04],
-      fire: { style: "sniper", auto: false, interval: 0.58, range: 132, damage: 3, spread: 0.00025, recoil: 0.42, pitchKick: 0.016, yawKick: 0.003, aimAssist: 0.013, hitRadius: 0.13, mobility: 0.92, tracerSpeed: 0, tracerLength: 132, tracerRadius: 0.038, tracerLifetime: 1, flashScale: 1.9, muzzleIntensity: 24, tracerColor: 0xf7fbff, hitColor: 0xffffff, missDistance: 92 }
+      fire: { style: "sniper", auto: false, interval: 0.58, range: 132, damage: 5, spread: 0.00025, recoil: 0.42, pitchKick: 0.016, yawKick: 0.003, aimAssist: 0.013, hitRadius: 0.13, mobility: 0.92, tracerSpeed: 0, tracerLength: 132, tracerRadius: 0.038, tracerLifetime: 1, flashScale: 1.9, muzzleIntensity: 24, tracerColor: 0xf7fbff, hitColor: 0xffffff, missDistance: 92 }
     },
     {
       id: "ray-gun",

@@ -1163,7 +1163,7 @@ function getWeaponProfile(asset = {}) {
     auto: fire.auto !== false,
     interval: Number(fire.interval) || FIRE_INTERVAL,
     range: Number(fire.range) || 95,
-    damage: THREE.MathUtils.clamp(Number(fire.damage) || 1, 1, 3),
+    damage: THREE.MathUtils.clamp(Number(fire.damage) || 1, 1, 5),
     spread: Number(fire.spread) || 0.001,
     projectiles: THREE.MathUtils.clamp(Math.trunc(Number(fire.projectiles) || 1), 1, 12),
     recoil: Number(fire.recoil) || 0.12,
@@ -2565,7 +2565,7 @@ function shoot() {
   weapon.flashBaseScale = profile.flashScale * (profile.projectiles > 1 ? 1.08 : 1);
   weapon.flash.scale.setScalar(weapon.flashBaseScale);
   weapon.muzzle.intensity = profile.muzzleIntensity + profile.projectiles * 0.8;
-  audio.shoot();
+  audio.shoot(profile);
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
   const baseDirection = camera.getWorldDirection(new THREE.Vector3()).normalize();
@@ -4609,11 +4609,11 @@ function createAudioSystem() {
     return context;
   }
 
-  function tone(frequency, duration, type = "sine", gain = 0.18, bend = 1) {
+  function tone(frequency, duration, type = "sine", gain = 0.18, bend = 1, delay = 0) {
     const ctx = ensure();
     const osc = ctx.createOscillator();
     const amp = ctx.createGain();
-    const now = ctx.currentTime;
+    const now = ctx.currentTime + delay;
     osc.type = type;
     osc.frequency.setValueAtTime(frequency, now);
     osc.frequency.exponentialRampToValueAtTime(Math.max(40, frequency * bend), now + duration);
@@ -4624,12 +4624,71 @@ function createAudioSystem() {
     osc.stop(now + duration + 0.02);
   }
 
+  function noiseBurst(duration, gain = 0.1, frequency = 900, delay = 0, filterType = "bandpass") {
+    const ctx = ensure();
+    const sampleCount = Math.max(1, Math.floor(ctx.sampleRate * duration));
+    const buffer = ctx.createBuffer(1, sampleCount, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let index = 0; index < sampleCount; index++) {
+      const fade = 1 - index / sampleCount;
+      data[index] = (Math.random() * 2 - 1) * fade;
+    }
+
+    const source = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const amp = ctx.createGain();
+    const now = ctx.currentTime + delay;
+    source.buffer = buffer;
+    filter.type = filterType;
+    filter.frequency.setValueAtTime(frequency, now);
+    filter.Q.setValueAtTime(0.8, now);
+    amp.gain.setValueAtTime(gain * volume, now);
+    amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    source.connect(filter).connect(amp).connect(ctx.destination);
+    source.start(now);
+    source.stop(now + duration + 0.02);
+  }
+
+  function weaponShot(profile = {}) {
+    switch (profile.style) {
+      case "sidearm":
+        tone(170, 0.05, "square", 0.2, 0.72);
+        tone(720, 0.035, "triangle", 0.09, 1.18);
+        break;
+      case "hand-cannon":
+        noiseBurst(0.05, 0.16, 620, 0, "lowpass");
+        tone(92, 0.105, "sawtooth", 0.3, 0.46);
+        tone(430, 0.045, "square", 0.1, 0.84, 0.012);
+        break;
+      case "shotgun":
+        noiseBurst(0.105, 0.26, 760, 0, "lowpass");
+        tone(78, 0.13, "sawtooth", 0.32, 0.42);
+        tone(240, 0.07, "triangle", 0.11, 0.72, 0.018);
+        break;
+      case "sniper":
+        noiseBurst(0.065, 0.2, 1100, 0, "bandpass");
+        tone(58, 0.2, "sawtooth", 0.36, 0.34);
+        tone(1180, 0.045, "triangle", 0.11, 1.42, 0.018);
+        break;
+      case "ray":
+        tone(520, 0.075, "sine", 0.13, 1.9);
+        tone(1040, 0.06, "triangle", 0.08, 1.35, 0.015);
+        break;
+      case "lightning":
+        noiseBurst(0.055, 0.16, 2200, 0, "highpass");
+        tone(300, 0.045, "square", 0.11, 2.4);
+        tone(920, 0.04, "sawtooth", 0.08, 0.55, 0.018);
+        break;
+      default:
+        tone(132, 0.055, "sawtooth", 0.28, 0.7);
+        tone(280, 0.04, "triangle", 0.08, 1.25);
+        break;
+    }
+  }
+
   return {
     resume: ensure,
-    shoot() {
-      tone(132, 0.055, "sawtooth", 0.28, 0.7);
-      tone(280, 0.04, "triangle", 0.08, 1.25);
-    },
+    shoot: weaponShot,
     hit() {
       tone(620, 0.055, "triangle", 0.16, 1.28);
     },
