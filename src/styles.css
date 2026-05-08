@@ -802,24 +802,37 @@ body[data-mode="racing"] .pulse-marker {
 }
 
 .crosshair {
+  --aim-color: #0dd0a3;
+  --aim-gap: 12px;
+  --aim-length: 10px;
+  --aim-opacity: 0.94;
   position: absolute;
   top: 50%;
   left: 50%;
   width: 42px;
   height: 42px;
-  opacity: 0.94;
+  opacity: var(--aim-opacity);
   transform: translate(-50%, -50%);
+  transition: opacity 90ms ease-out;
 }
 
 .crosshair i,
-.crosshair b,
+.crosshair b {
+  position: absolute;
+  display: block;
+  background: var(--aim-color);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.85),
+    0 0 12px color-mix(in srgb, var(--aim-color) 42%, transparent);
+}
+
 .pulse-marker i {
   position: absolute;
   display: block;
-  background: #0dd0a3;
+  background: #ffb238;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.85),
-    0 0 12px rgba(13, 208, 163, 0.36);
+    0 0 12px rgba(255, 178, 56, 0.36);
 }
 
 .crosshair b {
@@ -834,33 +847,35 @@ body[data-mode="racing"] .pulse-marker {
 .crosshair i:nth-child(1),
 .crosshair i:nth-child(2) {
   top: 50%;
-  width: 10px;
+  width: var(--aim-length);
   height: 2px;
   transform: translateY(-50%);
+  transition: left 70ms ease-out, right 70ms ease-out, width 70ms ease-out;
 }
 
 .crosshair i:nth-child(1) {
-  left: 0;
+  left: calc(50% - var(--aim-gap) - var(--aim-length));
 }
 
 .crosshair i:nth-child(2) {
-  right: 0;
+  right: calc(50% - var(--aim-gap) - var(--aim-length));
 }
 
 .crosshair i:nth-child(3),
 .crosshair i:nth-child(4) {
   left: 50%;
   width: 2px;
-  height: 10px;
+  height: var(--aim-length);
   transform: translateX(-50%);
+  transition: top 70ms ease-out, bottom 70ms ease-out, height 70ms ease-out;
 }
 
 .crosshair i:nth-child(3) {
-  top: 0;
+  top: calc(50% - var(--aim-gap) - var(--aim-length));
 }
 
 .crosshair i:nth-child(4) {
-  bottom: 0;
+  bottom: calc(50% - var(--aim-gap) - var(--aim-length));
 }
 
 .pulse-marker {

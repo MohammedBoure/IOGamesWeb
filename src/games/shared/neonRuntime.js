@@ -53,6 +53,7 @@ const hud = {
   speedValue: document.querySelector("#speedValue"),
   scoreboard: document.querySelector("#scoreboard"),
   scoreRows: document.querySelector("#scoreRows"),
+  crosshair: document.querySelector(".crosshair"),
   raceLapValue: document.querySelector("#raceLapValue"),
   raceCheckpointValue: document.querySelector("#raceCheckpointValue"),
   pulseMarker: document.querySelector("#pulseMarker"),
@@ -1138,10 +1139,20 @@ function getWeaponProfileById(weaponId) {
 
 function getWeaponProfile(asset = {}) {
   const fire = asset?.fire ?? {};
+  const style = fire.style ?? "rifle";
+  const styleAim = {
+    sidearm: [0.021, 0.17],
+    "hand-cannon": [0.017, 0.14],
+    "quick-burst": [0.023, 0.18],
+    rifle: [0.019, 0.15],
+    sniper: [0.01, 0.09],
+    ray: [0.027, 0.2],
+    lightning: [0.034, 0.24]
+  }[style] ?? [0.018, 0.14];
   return {
     id: asset?.id ?? "weapon",
     name: asset?.name ?? "Weapon",
-    style: fire.style ?? "rifle",
+    style,
     auto: fire.auto !== false,
     interval: Number(fire.interval) || FIRE_INTERVAL,
     range: Number(fire.range) || 95,
@@ -1151,6 +1162,8 @@ function getWeaponProfile(asset = {}) {
     recoil: Number(fire.recoil) || 0.12,
     pitchKick: Number(fire.pitchKick) || 0.004,
     yawKick: Number(fire.yawKick) || 0.002,
+    aimAssist: Number(fire.aimAssist) || styleAim[0],
+    hitRadius: Number(fire.hitRadius) || styleAim[1],
     tracerColor: Number(fire.tracerColor) || 0x2aa8ff,
     hitColor: Number(fire.hitColor) || 0xffdf8a,
     tracerRadius: Number(fire.tracerRadius) || 0.01,
@@ -2456,9 +2469,9 @@ function shoot() {
 
   const profile = getSelectedWeaponProfile();
   state.fireTimer = profile.interval;
-  state.recoil = Math.min(state.recoil + profile.recoil, 1.15);
-  pitch.rotation.x = THREE.MathUtils.clamp(pitch.rotation.x - profile.pitchKick - state.recoil * 0.0012, -1.34, 1.2);
-  player.rotation.y += randomRange(-profile.yawKick, profile.yawKick) * (1 + state.recoil * 0.35);
+  state.recoil = Math.min(state.recoil + profile.recoil * 0.78, 0.92);
+  pitch.rotation.x = THREE.MathUtils.clamp(pitch.rotation.x - profile.pitchKick * 0.58 - state.recoil * 0.00065, -1.34, 1.2);
+  player.rotation.y += randomRange(-profile.yawKick, profile.yawKick) * 0.18;
   weapon.flash.visible = true;
   weapon.flashTimer = profile.style === "ray" ? 0.07 : 0.045;
   weapon.flash.scale.setScalar(profile.style === "sniper" ? 1.45 : profile.projectiles > 1 ? 1.18 : 1);
@@ -2479,7 +2492,7 @@ function shoot() {
   let hits = 0;
   let blocked = 0;
   for (let index = 0; index < profile.projectiles; index++) {
-    const shotDirection = createShotDirection(baseDirection, profile, index);
+    const shotDirection = applyAimAssist(origin, createShotDirection(baseDirection, profile, index), profile, index);
     const result = resolveWeaponShot(origin, shotDirection, profile);
     if (result.hit) {
       hits += 1;
@@ -2502,12 +2515,25 @@ function shoot() {
 }
 
 function createShotDirection(baseDirection, profile, projectileIndex = 0) {
-  const spread = profile.spread * (projectileIndex === 0 ? 0.45 : 1);
+  const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
+  const spread = profile.spread * (projectileIndex === 0 ? 0.34 : 0.82) * (1 + speedPressure * 0.22);
   const direction = baseDirection.clone();
   direction.x += randomRange(-spread, spread);
   direction.y += randomRange(-spread * 0.55, spread * 0.55);
   direction.z += randomRange(-spread, spread);
   return direction.normalize();
+}
+
+function applyAimAssist(origin, direction, profile, projectileIndex = 0) {
+  const candidate = findAimCandidate(origin, direction, profile, projectileIndex);
+  if (!candidate) {
+    return direction;
+  }
+  const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
+  const projectileScale = projectileIndex === 0 ? 1 : 0.42;
+  const edgeFalloff = 1 - THREE.MathUtils.clamp(candidate.missRatio, 0, 1);
+  const strength = THREE.MathUtils.clamp((0.22 + speedPressure * 0.16) * edgeFalloff * projectileScale, 0, 0.42);
+  return direction.clone().lerp(candidate.direction, strength).normalize();
 }
 
 function resolveWeaponShot(origin, direction, profile) {
@@ -2518,9 +2544,11 @@ function resolveWeaponShot(origin, direction, profile) {
   const remoteHit = intersectRemotePlayers();
   const hitObjects = targets.filter((target) => target.alive).flatMap((target) => [target.body, target.core]);
   const targetHits = raycaster.intersectObjects(hitObjects, false);
+  const forgivingHit = findForgivingAimHit(origin, direction, profile);
   const nearestTargetDistance = targetHits[0]?.distance ?? Infinity;
   const nearestRemoteDistance = remoteHit?.hit.distance ?? Infinity;
-  const nearestDamageDistance = Math.min(nearestTargetDistance, nearestRemoteDistance);
+  const nearestForgivingDistance = forgivingHit?.hit.distance ?? Infinity;
+  const nearestDamageDistance = Math.min(nearestTargetDistance, nearestRemoteDistance, nearestForgivingDistance);
 
   if (worldHitDistance !== null && worldHitDistance <= nearestDamageDistance) {
     spawnTracer(origin, direction, worldHitDistance, true, profile);
@@ -2541,8 +2569,100 @@ function resolveWeaponShot(origin, direction, profile) {
     return { blocked: false, hit: true };
   }
 
+  if (forgivingHit?.remote) {
+    reportPlayerHit(forgivingHit.remote, forgivingHit.hit, origin, direction, profile);
+    spawnTracer(origin, direction, forgivingHit.hit.distance, true, profile);
+    return { blocked: false, hit: true };
+  }
+
+  if (forgivingHit?.target) {
+    hitTarget(forgivingHit.target, forgivingHit.hit, profile);
+    spawnTracer(origin, direction, forgivingHit.hit.distance, true, profile);
+    return { blocked: false, hit: true };
+  }
+
   spawnTracer(origin, direction, profile.missDistance, false, profile);
   return { blocked: false, hit: false };
+}
+
+function findForgivingAimHit(origin, direction, profile) {
+  const candidate = findAimCandidate(origin, direction, profile, 0);
+  if (!candidate || candidate.missRatio > 1) {
+    return null;
+  }
+  return candidate;
+}
+
+function findAimCandidate(origin, direction, profile, projectileIndex = 0) {
+  const speedPressure = THREE.MathUtils.clamp(getHorizontalSpeed() / 18, 0, 1);
+  const chainPressure = THREE.MathUtils.clamp(state.bhopChain / BHOP_CHAIN_MAX, 0, 1);
+  const projectileScale = projectileIndex === 0 ? 1 : 0.55;
+  const cone = (profile.aimAssist + speedPressure * 0.008 + chainPressure * 0.004) * projectileScale;
+  const extraRadius = (profile.hitRadius + speedPressure * 0.08 + chainPressure * 0.04) * projectileScale;
+  let best = null;
+
+  for (const target of targets) {
+    if (!target.alive || !target.group.visible) {
+      continue;
+    }
+    const center = target.group.getWorldPosition(new THREE.Vector3());
+    best = chooseAimCandidate(best, {
+      type: "target",
+      target,
+      center,
+      radius: target.radius + extraRadius
+    }, origin, direction, profile.range, cone);
+  }
+
+  for (const remote of remotePlayers.values()) {
+    if (!remote.alive || !remote.group.visible) {
+      continue;
+    }
+    for (const hitbox of remote.hitboxes) {
+      const center = hitbox.getWorldPosition(new THREE.Vector3());
+      best = chooseAimCandidate(best, {
+        type: "remote",
+        remote,
+        center,
+        radius: 0.34 + extraRadius
+      }, origin, direction, profile.range, cone);
+    }
+  }
+
+  return best;
+}
+
+function chooseAimCandidate(best, candidate, origin, direction, range, cone) {
+  const toCenter = candidate.center.clone().sub(origin);
+  const distance = toCenter.dot(direction);
+  if (distance < 1.2 || distance > range) {
+    return best;
+  }
+  const perpendicularSq = Math.max(0, toCenter.lengthSq() - distance * distance);
+  const perpendicular = Math.sqrt(perpendicularSq);
+  const allowed = candidate.radius + cone * distance;
+  if (perpendicular > allowed) {
+    return best;
+  }
+
+  const direct = toCenter.normalize();
+  const missRatio = perpendicular / Math.max(allowed, 0.001);
+  const score = missRatio + distance * 0.0008;
+  if (best && best.score <= score) {
+    return best;
+  }
+
+  return {
+    target: candidate.type === "target" ? candidate.target : null,
+    remote: candidate.type === "remote" ? candidate.remote : null,
+    hit: {
+      distance,
+      point: candidate.center.clone()
+    },
+    direction: direct,
+    missRatio,
+    score
+  };
 }
 
 function hitTarget(target, hit, profile = null) {
@@ -2812,6 +2932,22 @@ function updateHud() {
   hud.pulseBar.style.transform = `scaleX(${THREE.MathUtils.clamp(state.bhopChain / 12, 0, 1)})`;
   hud.pulseValue.textContent = `${state.bhopChain}x`;
   hud.speedValue.textContent = String(speed);
+  updateCrosshair(speed);
+}
+
+function updateCrosshair(speed) {
+  if (!hud.crosshair) {
+    return;
+  }
+  const profile = getSelectedWeaponProfile();
+  const speedPressure = THREE.MathUtils.clamp(speed / 180, 0, 1);
+  const gap = THREE.MathUtils.clamp(7.5 + speedPressure * 5.5 + state.recoil * 5 + profile.spread * 820, 7, 18);
+  const length = THREE.MathUtils.clamp(9.5 + profile.hitRadius * 12 - profile.spread * 240, 8, 14);
+  const color = `#${profile.tracerColor.toString(16).padStart(6, "0")}`;
+  hud.crosshair.style.setProperty("--aim-gap", `${gap.toFixed(1)}px`);
+  hud.crosshair.style.setProperty("--aim-length", `${length.toFixed(1)}px`);
+  hud.crosshair.style.setProperty("--aim-color", color);
+  hud.crosshair.style.setProperty("--aim-opacity", state.firing ? "1" : "0.94");
 }
 
 function updateLocalSnapshot() {
