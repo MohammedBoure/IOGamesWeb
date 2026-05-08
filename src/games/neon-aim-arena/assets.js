@@ -2,12 +2,12 @@ const basePath = "/assets/games/neon-aim-arena/models";
 
 export const neonAimArenaAssets = {
   character: {
-    id: "ninja",
-    name: "Ninja",
+    id: "swat",
+    name: "SWAT",
     type: "remote-player",
-    format: "glb",
-    path: `${basePath}/characters/ninja.glb`,
-    suitability: "Ready for browser loading; consider mesh compression later because it is about 12 MB."
+    format: "gltf",
+    path: `${basePath}/characters/swat.gltf`,
+    suitability: "Best current fit for the shooter theme and much lighter than the previous Ninja GLB."
   },
   weapons: [
     "AR_1",
@@ -39,6 +39,6 @@ export const neonAimArenaAssets = {
   })),
   notes: [
     "The weapon glTF files are self-contained and do not need external textures or .bin files.",
-    "Original source formats are kept out of Git under asset-sources/ to avoid bloating the runtime bundle."
+    "Only runtime-ready assets are kept in the project to avoid consuming space."
   ]
 };
