@@ -1787,6 +1787,7 @@ function setupEvents() {
 
   addEvent(window, "mousedown", (event) => {
     if (state.mode === GAME_MODES.SHOOTER && event.button === 0) {
+      audio.resume();
       state.firing = true;
       shoot();
     }
@@ -4828,7 +4829,8 @@ function createSkyTexture() {
 
 function createAudioSystem() {
   let context = null;
-  const volume = 0.14;
+  const volume = 0.2;
+  const sampleAudioEnabled = new URLSearchParams(window.location.search).get("audio") === "samples";
   const sampleUrls = {
     pistol: "/assets/games/neon-aim-arena/audio/9mm-pistol.mp3",
     shortPistol: "/assets/games/neon-aim-arena/audio/short-pistol.mp3",
@@ -4841,7 +4843,8 @@ function createAudioSystem() {
 
   function ensure() {
     if (!context) {
-      context = new AudioContext();
+      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+      context = new AudioContextConstructor();
     }
     if (context.state === "suspended") {
       context.resume();
@@ -4850,10 +4853,29 @@ function createAudioSystem() {
   }
 
   function resume() {
-    return ensure();
+    const ctx = ensure();
+    unlockOutput(ctx);
+    return ctx;
+  }
+
+  function unlockOutput(ctx) {
+    try {
+      const amp = ctx.createGain();
+      const osc = ctx.createOscillator();
+      amp.gain.setValueAtTime(0.0001, ctx.currentTime);
+      amp.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.02);
+      osc.connect(amp).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.02);
+    } catch {
+      // Audio unlock is best-effort; generated effects still try to play on demand.
+    }
   }
 
   function loadSample(key) {
+    if (!sampleAudioEnabled) {
+      return Promise.resolve(null);
+    }
     if (sampleBuffers.has(key)) {
       return Promise.resolve(sampleBuffers.get(key));
     }
@@ -4880,6 +4902,9 @@ function createAudioSystem() {
   }
 
   function playSample(key, { gain = 1, rate = 1, delay = 0, duration = null } = {}) {
+    if (!sampleAudioEnabled) {
+      return false;
+    }
     const buffer = sampleBuffers.get(key);
     if (!buffer) {
       loadSample(key);
@@ -4983,6 +5008,9 @@ function createAudioSystem() {
   }
 
   function sampleWeaponShot(profile = {}) {
+    if (!sampleAudioEnabled) {
+      return false;
+    }
     switch (profile.style) {
       case "sidearm":
         return playSample("pistol", { gain: 0.95, rate: 1.08 });
