@@ -439,6 +439,11 @@ input {
   box-shadow: 0 14px 44px rgba(44, 82, 96, 0.14);
 }
 
+.back-to-games::before {
+  display: none;
+  content: "";
+}
+
 .game-load-status {
   position: fixed;
   z-index: 7;
@@ -1829,8 +1834,32 @@ input:disabled {
   }
 
   .back-to-games {
-    top: 10px;
-    right: 10px;
+    top: calc(8px + env(safe-area-inset-top));
+    right: auto;
+    left: calc(8px + env(safe-area-inset-left));
+    display: grid;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    place-items: center;
+    border-radius: 8px;
+    padding: 0;
+    color: transparent;
+    font-size: 0;
+    line-height: 1;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 10px 28px rgba(44, 82, 96, 0.14);
+  }
+
+  .back-to-games::before {
+    display: block;
+    color: var(--ink);
+    content: "<";
+    font-size: 22px;
+    font-weight: 900;
+    transform: translateY(-1px);
   }
 
   .room-share-panel {
@@ -2065,6 +2094,35 @@ input:disabled {
 }
 
 @media (max-width: 920px) and (orientation: landscape) {
+  .back-to-games {
+    top: calc(8px + env(safe-area-inset-top));
+    right: auto;
+    left: calc(8px + env(safe-area-inset-left));
+    display: grid;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    place-items: center;
+    border-radius: 8px;
+    padding: 0;
+    color: transparent;
+    font-size: 0;
+    line-height: 1;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 10px 28px rgba(44, 82, 96, 0.14);
+  }
+
+  .back-to-games::before {
+    display: block;
+    color: var(--ink);
+    content: "<";
+    font-size: 22px;
+    font-weight: 900;
+    transform: translateY(-1px);
+  }
+
   .chess-shell {
     grid-template-columns: minmax(260px, calc(100dvh - 72px)) minmax(260px, 1fr);
     gap: 12px;
