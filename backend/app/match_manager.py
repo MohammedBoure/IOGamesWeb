@@ -14,6 +14,16 @@ from starlette.websockets import WebSocket, WebSocketState
 JsonDict = dict[str, Any]
 logger = logging.getLogger("neon_aim.match_manager")
 
+WEAPON_DAMAGE: dict[str, int] = {
+    "pistol": 3,
+    "long-pistol": 2,
+    "long-pistol-small": 3,
+    "rifle": 1,
+    "sniper-rifle": 3,
+    "ray-gun": 1,
+    "lightning-gun": 1,
+}
+
 
 class ClientMessageError(Exception):
     def __init__(self, code: str, message: str) -> None:
@@ -311,7 +321,8 @@ class MatchManager:
                 raise ClientMessageError("target_dead", "Target is already dead.")
 
             match = self._matches[attacker.match_id]
-            damage = clamp_int(payload.get("damage", 1), 1, 3)
+            weapon = sanitize_weapon_id(payload.get("weapon"))
+            damage = resolve_weapon_damage(payload)
             victim.health = max(0, victim.health - damage)
             victim.last_seen = utc_now()
             match_state = self._public_match_state_locked(match.id)
@@ -328,6 +339,8 @@ class MatchManager:
                             "attacker_name": attacker.name,
                             "victim_id": victim.id,
                             "victim_name": victim.name,
+                            "weapon": weapon,
+                            "damage": damage,
                             "health": victim.health,
                             "max_health": victim.max_health,
                             "match": match_state,
@@ -354,6 +367,8 @@ class MatchManager:
                             "killer_name": attacker.name,
                             "victim_id": victim.id,
                             "victim_name": victim.name,
+                            "weapon": weapon,
+                            "damage": damage,
                             "match": match_state,
                             "server_time": utc_now(),
                         },
@@ -365,20 +380,24 @@ class MatchManager:
         await self._flush(events)
         if should_respawn:
             logger.info(
-                "player killed match=%s killer=%s victim=%s score=%s-%s",
+                "player killed match=%s killer=%s victim=%s weapon=%s damage=%s score=%s-%s",
                 match.id,
                 attacker.id,
                 victim.id,
+                weapon or "-",
+                damage,
                 attacker.kills,
                 attacker.deaths,
             )
             self._respawn_tasks[victim.id] = asyncio.create_task(self._respawn_player_after(victim.id, match.id))
         else:
             logger.info(
-                "player damaged match=%s attacker=%s victim=%s health=%s/%s",
+                "player damaged match=%s attacker=%s victim=%s weapon=%s damage=%s health=%s/%s",
                 match.id,
                 attacker.id,
                 victim.id,
+                weapon or "-",
+                damage,
                 victim.health,
                 victim.max_health,
             )
@@ -650,6 +669,19 @@ def require_string(payload: JsonDict, key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ClientMessageError("missing_field", f"Missing required string field: {key}.")
     return value
+
+
+def sanitize_weapon_id(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[^a-zA-Z0-9_-]", "", value)[:32]
+
+
+def resolve_weapon_damage(payload: JsonDict) -> int:
+    weapon = sanitize_weapon_id(payload.get("weapon"))
+    if weapon in WEAPON_DAMAGE:
+        return WEAPON_DAMAGE[weapon]
+    return clamp_int(payload.get("damage", 1), 1, 3)
 
 
 def sanitize_name(value: str) -> str:

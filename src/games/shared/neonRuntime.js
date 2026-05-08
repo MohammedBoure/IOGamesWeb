@@ -2579,7 +2579,6 @@ function shoot() {
   });
 
   let hits = 0;
-  let blocked = 0;
   const shotContext = {
     remoteIds: new Set(),
     targetIndexes: new Set()
@@ -2590,18 +2589,12 @@ function shoot() {
     const result = resolveWeaponShot(origin, shotDirection, projectileProfile, shotContext);
     if (result.hit) {
       hits += 1;
-    } else if (result.blocked) {
-      blocked += 1;
     }
   }
 
   if (hits > 0) {
     showPulseMarker();
-  } else if (blocked > 0) {
-    showToast("Blocked");
-    audio.miss();
   } else {
-    showToast("Miss");
     audio.miss();
   }
 
@@ -3573,10 +3566,12 @@ function syncMatchState(match) {
 }
 
 function handlePlayerDamaged(message) {
+  const damage = Number.isFinite(Number(message.damage)) ? Number(message.damage) : null;
+  const damageText = damage ? ` -${damage}` : "";
   if (message.victim_id === network.clientId) {
-    showToast(`Hit - HP ${message.health}/${message.max_health}`);
+    showToast(`Hit${damageText} - HP ${message.health}/${message.max_health}`);
   } else if (message.attacker_id === network.clientId) {
-    showToast(`Hit ${message.victim_name ?? "Player"} - HP ${message.health}/${message.max_health}`);
+    showToast(`Hit ${message.victim_name ?? "Player"}${damageText} - HP ${message.health}/${message.max_health}`);
     audio.hit();
   }
 
