@@ -4829,6 +4829,15 @@ function createSkyTexture() {
 function createAudioSystem() {
   let context = null;
   const volume = 0.14;
+  const sampleUrls = {
+    pistol: "/assets/games/neon-aim-arena/audio/9mm-pistol.mp3",
+    shortPistol: "/assets/games/neon-aim-arena/audio/short-pistol.mp3",
+    gunShot: "/assets/games/neon-aim-arena/audio/gun-shot.mp3",
+    sciFiPulse: "/assets/games/neon-aim-arena/audio/sci-fi-pulse.mp3",
+    sciFiPowerdown: "/assets/games/neon-aim-arena/audio/sci-fi-powerdown.wav"
+  };
+  const sampleBuffers = new Map();
+  const sampleLoads = new Map();
 
   function ensure() {
     if (!context) {
@@ -4838,6 +4847,67 @@ function createAudioSystem() {
       context.resume();
     }
     return context;
+  }
+
+  function resume() {
+    const ctx = ensure();
+    preloadSamples();
+    return ctx;
+  }
+
+  function preloadSamples() {
+    Object.keys(sampleUrls).forEach((key) => {
+      loadSample(key);
+    });
+  }
+
+  function loadSample(key) {
+    if (sampleBuffers.has(key)) {
+      return Promise.resolve(sampleBuffers.get(key));
+    }
+    if (sampleLoads.has(key)) {
+      return sampleLoads.get(key);
+    }
+    const url = sampleUrls[key];
+    if (!url) {
+      return Promise.resolve(null);
+    }
+    const ctx = ensure();
+    const load = fetch(url)
+      .then((response) => response.ok ? response.arrayBuffer() : null)
+      .then((buffer) => buffer ? ctx.decodeAudioData(buffer) : null)
+      .then((audioBuffer) => {
+        if (audioBuffer) {
+          sampleBuffers.set(key, audioBuffer);
+        }
+        return audioBuffer;
+      })
+      .catch(() => null);
+    sampleLoads.set(key, load);
+    return load;
+  }
+
+  function playSample(key, { gain = 1, rate = 1, delay = 0, duration = null } = {}) {
+    const buffer = sampleBuffers.get(key);
+    if (!buffer) {
+      loadSample(key);
+      return false;
+    }
+    const ctx = ensure();
+    const source = ctx.createBufferSource();
+    const amp = ctx.createGain();
+    const now = ctx.currentTime + delay;
+    const playbackRate = Math.max(0.35, rate);
+    const naturalDuration = buffer.duration / playbackRate;
+    const playDuration = Math.max(0.04, duration ? Math.min(duration, naturalDuration) : naturalDuration);
+    source.buffer = buffer;
+    source.playbackRate.setValueAtTime(playbackRate, now);
+    amp.gain.setValueAtTime(gain * volume, now);
+    amp.gain.exponentialRampToValueAtTime(0.0001, now + playDuration);
+    source.connect(amp).connect(ctx.destination);
+    source.start(now);
+    source.stop(now + playDuration + 0.02);
+    return true;
   }
 
   function tone(frequency, duration, type = "sine", gain = 0.18, bend = 1, delay = 0) {
@@ -4881,6 +4951,9 @@ function createAudioSystem() {
   }
 
   function weaponShot(profile = {}) {
+    if (sampleWeaponShot(profile)) {
+      return;
+    }
     switch (profile.style) {
       case "sidearm":
         tone(170, 0.05, "square", 0.2, 0.72);
@@ -4917,8 +4990,51 @@ function createAudioSystem() {
     }
   }
 
+  function sampleWeaponShot(profile = {}) {
+    switch (profile.style) {
+      case "sidearm":
+        return playSample("pistol", { gain: 0.95, rate: 1.08 });
+      case "hand-cannon": {
+        const played = playSample("gunShot", { gain: 1.05, rate: 0.82 });
+        if (played) {
+          tone(82, 0.085, "sawtooth", 0.12, 0.48);
+        }
+        return played;
+      }
+      case "shotgun": {
+        const played = playSample("gunShot", { gain: 1.28, rate: 0.68 });
+        if (played) {
+          tone(62, 0.12, "sawtooth", 0.18, 0.42);
+          noiseBurst(0.06, 0.12, 580, 0.015, "lowpass");
+        }
+        return played;
+      }
+      case "rifle":
+        return playSample("shortPistol", { gain: 0.68, rate: 1.28 });
+      case "sniper": {
+        const played = playSample("gunShot", { gain: 1.18, rate: 0.56 });
+        if (played) {
+          playSample("sciFiPowerdown", { gain: 0.28, rate: 0.62, delay: 0.025, duration: 0.62 });
+          tone(48, 0.18, "sawtooth", 0.16, 0.38);
+        }
+        return played;
+      }
+      case "ray":
+        return playSample("sciFiPulse", { gain: 0.78, rate: 1.16, duration: 0.58 });
+      case "lightning": {
+        const played = playSample("sciFiPowerdown", { gain: 0.46, rate: 1.42, duration: 0.46 });
+        if (played) {
+          playSample("sciFiPulse", { gain: 0.34, rate: 1.65, delay: 0.012, duration: 0.34 });
+        }
+        return played;
+      }
+      default:
+        return false;
+    }
+  }
+
   return {
-    resume: ensure,
+    resume,
     shoot: weaponShot,
     reload(profile = {}) {
       const base = profile.style === "sniper" ? 92 : profile.style === "shotgun" ? 118 : 180;
