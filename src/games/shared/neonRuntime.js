@@ -4850,15 +4850,7 @@ function createAudioSystem() {
   }
 
   function resume() {
-    const ctx = ensure();
-    preloadSamples();
-    return ctx;
-  }
-
-  function preloadSamples() {
-    Object.keys(sampleUrls).forEach((key) => {
-      loadSample(key);
-    });
+    return ensure();
   }
 
   function loadSample(key) {
