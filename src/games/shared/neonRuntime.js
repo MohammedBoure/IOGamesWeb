@@ -1176,7 +1176,7 @@ function getWeaponProfile(asset = {}) {
     tracerRadius: Number(fire.tracerRadius) || 0.01,
     tracerSpeed: Math.max(0, Number.isFinite(rawTracerSpeed) ? rawTracerSpeed : defaultTracerSpeed),
     tracerLength: Math.max(0.08, Number(fire.tracerLength) || 3),
-    tracerLifetime: Math.max(0.04, Number(fire.tracerLifetime) || 0.08),
+    tracerLifetime: Math.max(0.04, Number(fire.tracerLifetime) || 1),
     flashScale: Math.max(0.4, Number(fire.flashScale) || 1),
     muzzleIntensity: Math.max(2, Number(fire.muzzleIntensity) || 12),
     missDistance: Number(fire.missDistance) || 48
@@ -2970,45 +2970,52 @@ function spawnTracer(origin, direction, length, hit, profile = null) {
   }
 
   const radius = profile?.tracerRadius ?? (hit ? 0.012 : 0.008);
-  const speed = profile?.tracerSpeed ?? 0;
-  const segmentLength = speed > 0 ? Math.min(shotLength, profile?.tracerLength ?? 3) : shotLength;
   const fadeTime = profile?.tracerLifetime ?? 0.08;
-  const geometry = new THREE.CylinderGeometry(hit ? radius * 1.15 : radius, hit ? radius * 0.38 : radius * 0.36, segmentLength, 8);
-  const material = new THREE.MeshBasicMaterial({
-    color: hit ? (profile?.hitColor ?? 0xffdf8a) : (profile?.tracerColor ?? 0x2aa8ff),
+  const color = hit ? (profile?.hitColor ?? 0xffdf8a) : (profile?.tracerColor ?? 0x2aa8ff);
+  const group = new THREE.Group();
+  const coreGeometry = new THREE.CylinderGeometry(radius * 0.78, radius * 0.62, shotLength, 8);
+  const glowGeometry = new THREE.CylinderGeometry(radius * 3.2, radius * 2.2, shotLength, 10);
+  const coreMaterial = new THREE.MeshBasicMaterial({
+    color,
     transparent: true,
-    opacity: hit ? 0.8 : 0.46,
+    opacity: hit ? 0.96 : 0.78,
     blending: THREE.AdditiveBlending,
     depthWrite: false
   });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.quaternion.setFromUnitVectors(WORLD_UP, direction);
-  mesh.position.copy(origin).addScaledVector(direction, speed > 0 ? segmentLength * 0.5 : shotLength / 2);
-  scene.add(mesh);
+  const glowMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: hit ? 0.24 : 0.18,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const core = new THREE.Mesh(coreGeometry, coreMaterial);
+  const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+  for (const mesh of [core, glow]) {
+    mesh.quaternion.setFromUnitVectors(WORLD_UP, direction);
+    mesh.position.copy(origin).addScaledVector(direction, shotLength / 2);
+    group.add(mesh);
+  }
+  scene.add(group);
 
-  const travelTime = speed > 0 ? shotLength / Math.max(speed, 0.001) : 0;
-  const duration = speed > 0 ? travelTime + fadeTime : fadeTime;
-  const baseOpacity = hit ? 0.8 : 0.46;
+  const duration = fadeTime;
+  const coreOpacity = coreMaterial.opacity;
+  const glowOpacity = glowMaterial.opacity;
+  const holdTime = Math.min(0.72, duration * 0.72);
 
   effects.push({
-    object: mesh,
+    object: group,
     age: 0,
     update(dt) {
       this.age += dt;
-      if (speed > 0) {
-        const traveled = Math.min(shotLength, Math.max(segmentLength * 0.35, this.age * speed));
-        const visibleLength = Math.min(segmentLength, traveled, shotLength);
-        const centerDistance = Math.min(shotLength - visibleLength * 0.5, Math.max(visibleLength * 0.5, traveled - visibleLength * 0.5));
-        mesh.scale.y = visibleLength / segmentLength;
-        mesh.position.copy(origin).addScaledVector(direction, centerDistance);
-        const fade = this.age > travelTime ? 1 - (this.age - travelTime) / fadeTime : 1;
-        material.opacity = Math.max(0, baseOpacity * fade);
-      } else {
-        material.opacity = Math.max(0, baseOpacity * (1 - this.age / fadeTime));
-      }
+      const fade = this.age <= holdTime ? 1 : 1 - (this.age - holdTime) / Math.max(0.001, duration - holdTime);
+      coreMaterial.opacity = Math.max(0, coreOpacity * fade);
+      glowMaterial.opacity = Math.max(0, glowOpacity * fade);
       if (this.age >= duration) {
-        geometry.dispose();
-        material.dispose();
+        coreGeometry.dispose();
+        glowGeometry.dispose();
+        coreMaterial.dispose();
+        glowMaterial.dispose();
         this.done = true;
       }
     }
@@ -3050,14 +3057,16 @@ function spawnLightningTracer(origin, direction, length, hit, profile = null) {
   }
 
   scene.add(group);
-  const lifetime = profile?.tracerLifetime ?? 0.12;
+  const lifetime = profile?.tracerLifetime ?? 1;
   const baseOpacity = material.opacity;
+  const holdTime = Math.min(0.72, lifetime * 0.72);
   effects.push({
     object: group,
     age: 0,
     update(dt) {
       this.age += dt;
-      material.opacity = Math.max(0, baseOpacity * (1 - this.age / lifetime));
+      const fade = this.age <= holdTime ? 1 : 1 - (this.age - holdTime) / Math.max(0.001, lifetime - holdTime);
+      material.opacity = Math.max(0, baseOpacity * fade);
       if (this.age >= lifetime) {
         group.traverse((child) => {
           if (child.isMesh) {
