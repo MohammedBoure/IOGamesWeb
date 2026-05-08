@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { clone as cloneSkinnedModel } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { worldAssets } from "../../shared/worldAssets.js";
 
 export function createNeonArenaRuntime(options = {}) {
 const runtimeOptions = {
@@ -151,6 +154,7 @@ const effects = [];
 const raceCheckpoints = [];
 const remotePlayers = new Map();
 const scorePlayers = new Map();
+const worldModelCache = new Map();
 const keys = new Set();
 const MOVEMENT_KEYS = new Set(["z", "s", "q", "d"]);
 const GAMEPLAY_KEYS = new Set(["z", "s", "q", "d", " ", "control", "ctrl", "x"]);
@@ -301,6 +305,7 @@ function setupWorld() {
   addMovementGeometry();
   addTargetLanes();
   addAmbientMarkers();
+  addShooterWorldProps();
 }
 
 function setupRacingWorld() {
@@ -379,6 +384,7 @@ function setupRacingWorld() {
 
   race.car = createRaceCar();
   race.world.add(race.car);
+  addRacingWorldProps();
 }
 
 function addRaceBank(x, z, width, depth, axis, tilt) {
@@ -692,6 +698,133 @@ function addAmbientMarkers() {
     marker.position.set(x, 3.45, z);
     scene.add(marker);
   }
+}
+
+function addShooterWorldProps() {
+  const placements = [
+    { id: "barn", x: -53, z: -47, rotation: 0.45, scale: 1.18, collider: [9.2, 9.8] },
+    { id: "open-barn", x: -52, z: 43, rotation: -0.4, scale: 1.12, collider: [7.2, 7.8] },
+    { id: "silo", x: 55, z: -48, rotation: -0.18, scale: 1.08, collider: [4.4, 4.4] },
+    { id: "water-tower", x: 53, z: 46, rotation: 0.22, scale: 1.08, collider: [3.4, 3.4] },
+    { id: "well", x: 35, z: 18, rotation: 0.72, scale: 1.55, collider: [2.4, 2.4] },
+    { id: "common-tree-1", x: -64, z: -16, rotation: 0.2, scale: 2.5, collider: [2.4, 2.4] },
+    { id: "pine-tree-1", x: 64, z: -14, rotation: -0.4, scale: 2.4, collider: [2.1, 2.1] },
+    { id: "cactus-1", x: 42, z: -31, rotation: 0.9, scale: 2.3, collider: [1.3, 1.3] },
+    { id: "bush-1", x: -34, z: 28, rotation: -0.35, scale: 1.8 },
+    { id: "rock-1", x: -31, z: -6, rotation: 0.55, scale: 3.1, collider: [1.6, 1.5] },
+    { id: "rock-moss-1", x: 31, z: -25, rotation: -0.2, scale: 3.0, collider: [1.6, 1.5] },
+    { id: "wood-log", x: -36, z: 3, rotation: 1.08, scale: 2.0, collider: [1.3, 4.9] },
+    { id: "tree-stump", x: 33, z: -2, rotation: -0.65, scale: 2.2, collider: [2.5, 2.0] },
+    { id: "grass", x: -12, z: 31, rotation: 0.1, scale: 1.35 },
+    { id: "plant-1", x: 12, z: 31, rotation: -0.1, scale: 1.45 }
+  ];
+
+  for (const placement of placements) {
+    addWorldProp(scene, placement);
+    if (placement.collider) {
+      colliders.push(makeRotatedCollider(
+        new THREE.Vector3(placement.x, 0, placement.z),
+        placement.collider[0],
+        placement.collider[1],
+        placement.rotation || 0
+      ));
+    }
+  }
+}
+
+function addRacingWorldProps() {
+  const placements = [
+    { id: "windmill", x: -74, z: 60, rotation: 0.34, scale: 1.35 },
+    { id: "barn", x: 72, z: 60, rotation: -0.55, scale: 1.2 },
+    { id: "open-barn", x: -76, z: -62, rotation: 0.62, scale: 1.12 },
+    { id: "silo", x: 74, z: -62, rotation: -0.2, scale: 1.08 },
+    { id: "water-tower", x: 13, z: -69, rotation: 0.3, scale: 1.08 },
+    { id: "well", x: -18, z: 6, rotation: -0.5, scale: 1.2 },
+    { id: "fence", x: -20, z: 63, rotation: 0, scale: 1.55 },
+    { id: "fence", x: -8, z: 63, rotation: 0, scale: 1.55 },
+    { id: "fence-2", x: 20, z: -63, rotation: Math.PI, scale: 1.55 },
+    { id: "fence-2", x: 8, z: -63, rotation: Math.PI, scale: 1.55 },
+    { id: "common-tree-1", x: -71, z: 22, rotation: 0.1, scale: 2.8 },
+    { id: "pine-tree-1", x: 72, z: 18, rotation: -0.25, scale: 2.7 },
+    { id: "palm-tree-1", x: 72, z: -19, rotation: 0.45, scale: 1.8 },
+    { id: "cactus-1", x: -73, z: -20, rotation: -0.6, scale: 2.6 },
+    { id: "rock-moss-1", x: 0, z: 0, rotation: 0.4, scale: 4.8 },
+    { id: "rock-1", x: 10, z: 8, rotation: -0.2, scale: 4.2 },
+    { id: "bush-1", x: -12, z: -8, rotation: 0.2, scale: 2.5 },
+    { id: "grass", x: 0, z: 11, rotation: 0.1, scale: 2.0 },
+    { id: "plant-1", x: -10, z: 10, rotation: -0.4, scale: 2.0 }
+  ];
+
+  for (const placement of placements) {
+    addWorldProp(race.world, placement);
+  }
+}
+
+function addWorldProp(parent, placement) {
+  const asset = findWorldAsset(placement.id);
+  if (!asset) {
+    return;
+  }
+
+  loadWorldModel(asset).then((source) => {
+    if (disposed || !source) {
+      return;
+    }
+    const model = source.clone(true);
+    const group = new THREE.Group();
+    group.position.set(placement.x, placement.y ?? 0, placement.z);
+    group.rotation.y = placement.rotation || 0;
+    parent.add(group);
+    prepareWorldModel(model, placement.scale ?? 1);
+    group.add(model);
+  });
+}
+
+function findWorldAsset(id) {
+  return worldAssets.find((asset) => asset.id === id || asset.file === id || asset.name === id) || null;
+}
+
+function loadWorldModel(asset) {
+  if (worldModelCache.has(asset.id)) {
+    return worldModelCache.get(asset.id);
+  }
+
+  const promise = new MTLLoader()
+    .loadAsync(asset.mtl)
+    .then((materials) => {
+      materials.preload();
+      const loader = new OBJLoader();
+      loader.setMaterials(materials);
+      return loader.loadAsync(asset.obj);
+    })
+    .then((object) => {
+      object.name = asset.id;
+      return object;
+    })
+    .catch((error) => {
+      console.warn(`Could not load world model: ${asset.id}`, error);
+      return null;
+    });
+
+  worldModelCache.set(asset.id, promise);
+  return promise;
+}
+
+function prepareWorldModel(model, scale) {
+  model.scale.setScalar(scale);
+  model.traverse((child) => {
+    if (!child.isMesh) {
+      return;
+    }
+    child.castShadow = true;
+    child.receiveShadow = true;
+  });
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  model.position.x -= center.x;
+  model.position.z -= center.z;
+  model.position.y -= box.min.y;
 }
 
 function addRamp(x, z, width, depth, rotation, height) {
