@@ -108,8 +108,10 @@ const MOVE_STEP = 0.26;
 const WEAPON_CLIP_DISTANCE = 1.22;
 const LOCAL_WEAPON_MODEL_LENGTH = 1.46;
 const REMOTE_WEAPON_MODEL_LENGTH = 0.98;
+const REMOTE_HAND_WEAPON_LENGTH = 1.08;
 const REMOTE_CHARACTER_HEIGHT = 1.74;
 const REMOTE_CHARACTER_YAW_OFFSET = Math.PI;
+const REMOTE_WEAPON_HAND_NAMES = ["WristR", "Wrist.R", "HandR", "RightHand"];
 const tempVec3 = new THREE.Vector3();
 const tempVec2 = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
@@ -218,6 +220,7 @@ const localSnapshot = {
   velocity: [0, 0, 0],
   grounded: false,
   bhopChain: 0,
+  animation: "idle",
   alive: true
 };
 const network = {
@@ -851,20 +854,42 @@ function mountRemoteCharacterModel(remote) {
   remote.characterMount.clear();
   remote.characterMount.add(model);
   remote.characterModel = model;
+  remote.weaponHand = findRuntimeModelNode(model, REMOTE_WEAPON_HAND_NAMES);
   remote.fallbackBodyGroup.visible = false;
   setupRemoteCharacterAnimation(remote, model, runtimeModels.character.gltf.animations);
+  mountRemoteWeaponModel(remote);
 }
 
 function mountRemoteWeaponModel(remote) {
-  if (remote.kind !== "shooter" || remote.weaponModel || !runtimeModels.weapon.gltf || !remote.weaponMount) {
+  if (remote.kind !== "shooter" || !runtimeModels.weapon.gltf || !remote.weaponMount) {
     return;
   }
-  const model = cloneRuntimeModel(runtimeModels.weapon.gltf);
-  prepareRuntimeModel(model);
-  fitWeaponModel(model, REMOTE_WEAPON_MODEL_LENGTH, new THREE.Vector3(0, 0, 0));
-  remote.weaponMount.clear();
-  remote.weaponMount.add(model);
-  remote.weaponModel = model;
+  const parent = remote.weaponHand || remote.weaponMount;
+  const shouldAttachToHand = parent === remote.weaponHand;
+  if (remote.weaponModel && remote.weaponModel.parent === parent) {
+    return;
+  }
+
+  const model = remote.weaponModel || cloneRuntimeModel(runtimeModels.weapon.gltf);
+  if (!remote.weaponModel) {
+    prepareRuntimeModel(model);
+    remote.weaponModel = model;
+  }
+
+  model.parent?.remove(model);
+  if (shouldAttachToHand) {
+    fitHandWeaponModel(model);
+  } else {
+    fitWeaponModel(model, REMOTE_WEAPON_MODEL_LENGTH, new THREE.Vector3(0, 0, 0));
+  }
+
+  if (!shouldAttachToHand) {
+    remote.weaponMount.clear();
+  }
+  parent.add(model);
+  remote.weaponAttachedToHand = shouldAttachToHand;
+  remote.weaponBasePosition.copy(model.position);
+  remote.weaponBaseRotation.copy(model.rotation);
   remote.fallbackWeaponGroup.visible = false;
 }
 
@@ -891,6 +916,16 @@ function hideEmbeddedCharacterProps(model) {
   });
 }
 
+function findRuntimeModelNode(model, names) {
+  for (const name of names) {
+    const node = model.getObjectByName(name);
+    if (node) {
+      return node;
+    }
+  }
+  return null;
+}
+
 function fitWeaponModel(model, targetLength, offset) {
   model.position.set(0, 0, 0);
   model.rotation.set(0, Math.PI / 2, 0);
@@ -898,6 +933,15 @@ function fitWeaponModel(model, targetLength, offset) {
   scaleObjectToAxis(model, "z", targetLength);
   centerObject(model, true);
   model.position.add(offset);
+}
+
+function fitHandWeaponModel(model) {
+  model.position.set(0, 0, 0);
+  model.rotation.set(0, 0, Math.PI / 2);
+  model.scale.setScalar(1);
+  scaleObjectToAxis(model, "y", REMOTE_HAND_WEAPON_LENGTH);
+  centerObject(model, true);
+  model.position.set(0.02, 0.22, -0.025);
 }
 
 function fitCharacterModel(model, targetHeight) {
@@ -930,7 +974,8 @@ function setupRemoteCharacterAnimation(remote, model, animations = []) {
   const idleClip = findAnimationClip(animations, ["Idle_Gun_Pointing", "Idle_Gun", "Idle", "Idle_Neutral"]);
   const walkClip = findAnimationClip(animations, ["Walk", "Run", "Run_Shoot"]);
   const runClip = findAnimationClip(animations, ["Run_Shoot", "Run", "Walk"]);
-  if (!idleClip && !walkClip && !runClip) {
+  const shootClip = findAnimationClip(animations, ["Idle_Gun_Shoot", "Gun_Shoot", "Run_Shoot"]);
+  if (!idleClip && !walkClip && !runClip && !shootClip) {
     return;
   }
   remote.mixer = new THREE.AnimationMixer(model);
@@ -939,7 +984,8 @@ function setupRemoteCharacterAnimation(remote, model, animations = []) {
     actions: {
       idle: idleClip ? remote.mixer.clipAction(idleClip) : null,
       walk: walkClip ? remote.mixer.clipAction(walkClip) : null,
-      run: runClip ? remote.mixer.clipAction(runClip) : null
+      run: runClip ? remote.mixer.clipAction(runClip) : null,
+      shoot: shootClip ? remote.mixer.clipAction(shootClip) : null
     }
   };
 
@@ -2131,6 +2177,7 @@ function updateLocalSnapshot() {
     localSnapshot.velocity[2] = Number(race.velocity.y.toFixed(3));
     localSnapshot.grounded = true;
     localSnapshot.bhopChain = 0;
+    localSnapshot.animation = race.drift > 0.18 ? "drift" : race.speed > 1 ? "drive" : "idle";
     localSnapshot.alive = true;
     return;
   }
@@ -2145,7 +2192,35 @@ function updateLocalSnapshot() {
   localSnapshot.velocity[2] = Number(velocity.z.toFixed(3));
   localSnapshot.grounded = state.grounded;
   localSnapshot.bhopChain = state.bhopChain;
+  localSnapshot.animation = getLocalAnimationState();
   localSnapshot.alive = state.alive;
+}
+
+function getLocalAnimationState() {
+  if (!state.alive) {
+    return "dead";
+  }
+  const speed = getHorizontalSpeed();
+  const crouching = isCtrlHeld();
+  if (state.slideTimer > 0 || (crouching && speed > 5.5)) {
+    return "slide";
+  }
+  if (crouching) {
+    return "crouch";
+  }
+  if (!state.grounded) {
+    return state.verticalVelocity > 0.4 ? "jump" : "fall";
+  }
+  if (state.firing) {
+    return "shoot";
+  }
+  if (speed > 5.5) {
+    return "run";
+  }
+  if (speed > 0.35) {
+    return "walk";
+  }
+  return "idle";
 }
 
 function getLocalSnapshot() {
@@ -2156,6 +2231,7 @@ function getLocalSnapshot() {
     velocity: [...localSnapshot.velocity],
     grounded: localSnapshot.grounded,
     bhopChain: localSnapshot.bhopChain,
+    animation: localSnapshot.animation,
     alive: localSnapshot.alive
   };
 }
@@ -2361,7 +2437,7 @@ function handleNetworkMessage(message) {
   }
 
   if (message.type === "player_action" && message.action === "shoot") {
-    drawRemoteAction(message.payload);
+    drawRemoteAction(message.payload, message.player_id);
     return;
   }
 
@@ -2730,14 +2806,27 @@ function createRemotePlayer(playerInfo) {
     group,
     characterMount,
     fallbackBodyGroup,
+    hitboxGroup,
     weaponMount,
     fallbackWeaponGroup,
     label,
     hitboxes: [bodyHitbox, chestHitbox, headHitbox, visorHitbox],
     targetPosition: new THREE.Vector3(0, 0, 0),
     targetYaw: 0,
+    targetPitch: 0,
     targetSpeed: 0,
+    targetVerticalVelocity: 0,
+    grounded: true,
+    animationHint: "idle",
     animationSpeed: 0,
+    postureBlend: 0,
+    airborneBlend: 0,
+    shootTimer: 0,
+    weaponKick: 0,
+    weaponHand: null,
+    weaponAttachedToHand: false,
+    weaponBasePosition: new THREE.Vector3(),
+    weaponBaseRotation: new THREE.Euler(),
     pendingHit: 0,
     lastSeen: performance.now(),
     mixer: null,
@@ -2800,6 +2889,14 @@ function updateRemotePlayerState(playerId, remoteState) {
     remote.alive = remoteState.alive;
   }
 
+  if (typeof remoteState.grounded === "boolean") {
+    remote.grounded = remoteState.grounded;
+  }
+
+  if (typeof remoteState.animation === "string") {
+    remote.animationHint = remoteState.animation.slice(0, 32);
+  }
+
   if (Array.isArray(remoteState.position) && remoteState.position.length >= 3) {
     remote.targetPosition.set(
       Number(remoteState.position[0]) || 0,
@@ -2810,12 +2907,15 @@ function updateRemotePlayerState(playerId, remoteState) {
 
   if (Array.isArray(remoteState.rotation) && remoteState.rotation.length >= 1) {
     remote.targetYaw = Number(remoteState.rotation[0]) || 0;
+    remote.targetPitch = Number(remoteState.rotation[1]) || 0;
   }
 
   if (Array.isArray(remoteState.velocity) && remoteState.velocity.length >= 3) {
     const velocityX = Number(remoteState.velocity[0]) || 0;
+    const velocityY = Number(remoteState.velocity[1]) || 0;
     const velocityZ = Number(remoteState.velocity[2]) || 0;
     remote.targetSpeed = Math.hypot(velocityX, velocityZ);
+    remote.targetVerticalVelocity = velocityY;
   }
 
   remote.lastSeen = performance.now();
@@ -2835,17 +2935,78 @@ function updateRemotePlayers(dt) {
 }
 
 function updateRemoteCharacterMotion(remote, dt) {
-  if (remote.kind !== "shooter" || !remote.animation) {
+  if (remote.kind !== "shooter") {
     return;
   }
   remote.animationSpeed = THREE.MathUtils.damp(remote.animationSpeed, remote.targetSpeed, 8, dt);
+  remote.shootTimer = Math.max(0, remote.shootTimer - dt);
+  remote.weaponKick = THREE.MathUtils.damp(remote.weaponKick, 0, 18, dt);
+
+  const posture = getRemotePosture(remote);
+  updateRemoteProceduralPose(remote, posture, dt);
+  updateRemoteWeaponPose(remote);
+
+  if (!remote.animation) {
+    return;
+  }
+
   const moving = remote.animationSpeed > 0.28;
   const running = remote.animationSpeed > 5.5;
-  setRemoteAnimation(remote, moving ? (running ? "run" : "walk") : "idle");
+  const animationName = remote.shootTimer > 0 && remote.animation.actions.shoot
+    ? "shoot"
+    : moving ? (running ? "run" : "walk") : "idle";
+  setRemoteAnimation(remote, animationName);
 
   const moveAction = running ? remote.animation.actions.run : remote.animation.actions.walk;
   if (moveAction) {
-    moveAction.timeScale = THREE.MathUtils.clamp(remote.animationSpeed / 5.8, 0.75, 1.45);
+    moveAction.timeScale = THREE.MathUtils.clamp(remote.animationSpeed / 5.8, posture === "slide" ? 1.05 : 0.75, 1.55);
+  }
+}
+
+function getRemotePosture(remote) {
+  if (remote.animationHint === "slide") {
+    return "slide";
+  }
+  if (remote.animationHint === "crouch") {
+    return "crouch";
+  }
+  if (!remote.grounded || remote.animationHint === "jump" || remote.animationHint === "fall") {
+    return remote.targetVerticalVelocity > 0.4 || remote.animationHint === "jump" ? "jump" : "fall";
+  }
+  return "stand";
+}
+
+function updateRemoteProceduralPose(remote, posture, dt) {
+  const slide = posture === "slide";
+  const crouch = posture === "crouch";
+  const airborne = posture === "jump" || posture === "fall";
+  remote.postureBlend = THREE.MathUtils.damp(remote.postureBlend, slide ? 1 : crouch ? 0.62 : 0, 9, dt);
+  remote.airborneBlend = THREE.MathUtils.damp(remote.airborneBlend, airborne ? 1 : 0, 7, dt);
+
+  const slideLean = remote.postureBlend;
+  const jumpLean = remote.airborneBlend * (posture === "jump" ? -0.14 : 0.12);
+  remote.characterMount.position.y = THREE.MathUtils.damp(remote.characterMount.position.y, -0.42 * slideLean, 10, dt);
+  remote.characterMount.rotation.x = THREE.MathUtils.damp(remote.characterMount.rotation.x, -0.52 * slideLean + jumpLean, 9, dt);
+  remote.characterMount.rotation.z = THREE.MathUtils.damp(remote.characterMount.rotation.z, 0.12 * slideLean, 9, dt);
+  remote.characterMount.scale.y = THREE.MathUtils.damp(remote.characterMount.scale.y, 1 - 0.22 * slideLean, 9, dt);
+
+  if (remote.hitboxGroup) {
+    remote.hitboxGroup.position.y = THREE.MathUtils.damp(remote.hitboxGroup.position.y, -0.24 * slideLean, 10, dt);
+    remote.hitboxGroup.scale.y = THREE.MathUtils.damp(remote.hitboxGroup.scale.y, 1 - 0.24 * slideLean, 10, dt);
+  }
+}
+
+function updateRemoteWeaponPose(remote) {
+  if (!remote.weaponModel) {
+    return;
+  }
+  remote.weaponModel.position.copy(remote.weaponBasePosition);
+  remote.weaponModel.rotation.copy(remote.weaponBaseRotation);
+  if (remote.weaponAttachedToHand) {
+    remote.weaponModel.position.y -= remote.weaponKick * 0.085;
+  } else {
+    remote.weaponModel.position.z += remote.weaponKick * 0.08;
+    remote.weaponMount.rotation.x = -0.08 + THREE.MathUtils.clamp(remote.targetPitch, -0.8, 0.8) * 0.2;
   }
 }
 
@@ -2926,13 +3087,32 @@ function clearScoreboard() {
   updateScoreboard([]);
 }
 
-function drawRemoteAction(payload) {
+function drawRemoteAction(payload, playerId = null) {
   if (!payload?.origin || !payload?.direction) {
     return;
   }
   const origin = new THREE.Vector3(payload.origin[0], payload.origin[1], payload.origin[2]);
   const direction = new THREE.Vector3(payload.direction[0], payload.direction[1], payload.direction[2]).normalize();
   spawnTracer(origin, direction, 42, false);
+  if (playerId) {
+    const remote = remotePlayers.get(playerId);
+    if (remote) {
+      triggerRemoteShoot(remote);
+    }
+  }
+}
+
+function triggerRemoteShoot(remote) {
+  remote.shootTimer = 0.22;
+  remote.weaponKick = 1;
+  const shootAction = remote.animation?.actions?.shoot;
+  if (shootAction) {
+    if (remote.animation.current === "shoot") {
+      shootAction.reset().play();
+    } else {
+      setRemoteAnimation(remote, "shoot", 0.04);
+    }
+  }
 }
 
 function createNameSprite(name, color) {
