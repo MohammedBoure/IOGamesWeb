@@ -10,6 +10,7 @@ Scalable online web games. The current build includes **Neon Aim Arena**, a 3D b
 - WebSocket multiplayer.
 - Create a match or join an existing match.
 - Simple 6-digit Match IDs.
+- Backend wake-up check for Render free instances before room actions.
 - Deployment settings through `.env`.
 
 ## Requirements
@@ -126,9 +127,12 @@ From the home screen:
 
 1. Enter the player name.
 2. Choose a game.
-3. Click `Create Room` to get a 6-digit Match ID.
-4. Send the Match ID to another player.
-5. The other player enters the same Match ID and clicks `Join Room`.
+3. Wait until the backend status says `Backend connected`.
+4. Click `Create Room` to get a 6-digit Match ID.
+5. Send the Match ID to another player.
+6. The other player enters the same Match ID and clicks `Join Room`.
+
+The frontend calls the backend `/health` endpoint on the home screen. On Render's free plan, that request also wakes the sleeping backend and the UI keeps retrying while it shows a wait message.
 
 The local player snapshot is available in the browser:
 

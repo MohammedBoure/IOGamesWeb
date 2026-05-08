@@ -8,6 +8,9 @@ import {
 const DEFAULT_PLAYER_NAME = import.meta.env.VITE_DEFAULT_PLAYER_NAME || "Player";
 const DEFAULT_SERVER_URL = import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000/ws";
 const BACKEND_ACCESS_TOKEN = import.meta.env.VITE_BACKEND_ACCESS_TOKEN || "";
+const BACKEND_WAKE_WAIT_SECONDS = 60;
+const BACKEND_HEALTH_TIMEOUT_MS = 9000;
+const BACKEND_HEALTH_RETRY_MS = 5000;
 
 const GAME_VIEW_HTML = `
   <div id="game"></div>
@@ -149,6 +152,17 @@ export function createArcadeApp(root) {
   let exitHandler = null;
   let createdRoomLease = null;
   let pendingRoomReadyReleaseHandler = null;
+  let backendCheckToken = 0;
+  let backendRetryTimer = null;
+  let backendCountdownTimer = null;
+  let backendWakeStartedAt = 0;
+  const backendGate = {
+    status: "checking",
+    title: "Checking backend",
+    detail: "Contacting the game server...",
+    ready: false,
+    secondsRemaining: null
+  };
 
   function renderLibrary(statusText = "") {
     destroyActiveGame();
@@ -179,6 +193,14 @@ export function createArcadeApp(root) {
             <p class="eyebrow">ROOM</p>
             <h2>${escapeHtml(selectedGame.title)}</h2>
             <p class="brief">${escapeHtml(selectedGame.summary)}</p>
+            <div id="backendGate" class="backend-gate" data-status="${escapeHtml(backendGate.status)}" role="status" aria-live="polite">
+              <span class="backend-gate-dot"></span>
+              <span class="backend-gate-copy">
+                <strong id="backendGateTitle">${escapeHtml(backendGate.title)}</strong>
+                <small id="backendGateDetail">${escapeHtml(backendGate.detail)}</small>
+              </span>
+              <button id="retryBackendButton" class="ghost-button compact" type="button">Retry</button>
+            </div>
             <label>
               <span>Match ID</span>
               <input id="libraryMatchId" type="text" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="123456" autocomplete="off" dir="ltr" />
@@ -194,6 +216,7 @@ export function createArcadeApp(root) {
     `;
 
     bindLibraryEvents();
+    updateBackendGateView();
   }
 
   function renderGameButton(game, selectedId) {
@@ -229,15 +252,29 @@ export function createArcadeApp(root) {
     });
 
     root.querySelector("#createRoomButton")?.addEventListener("click", () => {
+      if (!backendGate.ready) {
+        status.textContent = "Backend is still starting. Please wait.";
+        startBackendCheck(true);
+        return;
+      }
       createRoomDialog();
     });
     root.querySelector("#joinRoomButton")?.addEventListener("click", () => {
+      if (!backendGate.ready) {
+        status.textContent = "Backend is still starting. Please wait.";
+        startBackendCheck(true);
+        return;
+      }
       if (!matchIdInput?.value.trim()) {
         status.textContent = "Enter a Match ID to join a room.";
         matchIdInput?.focus();
         return;
       }
       launchGame("join", matchIdInput.value.trim());
+    });
+    root.querySelector("#retryBackendButton")?.addEventListener("click", () => {
+      status.textContent = "";
+      startBackendCheck(true);
     });
   }
 
@@ -267,9 +304,7 @@ export function createArcadeApp(root) {
     } catch (error) {
       status.textContent = error.message || "Could not create the room.";
     } finally {
-      if (createButton) {
-        createButton.disabled = false;
-      }
+      updateBackendGateView();
     }
   }
 
@@ -413,13 +448,170 @@ export function createArcadeApp(root) {
   }
 
   renderLibrary();
-  if (new URLSearchParams(window.location.search).has("capture")) {
+    if (new URLSearchParams(window.location.search).has("capture")) {
     launchGame(null);
+  } else {
+    startBackendCheck();
   }
 
   return {
-    destroy: destroyActiveGame
+    destroy() {
+      destroyActiveGame();
+      stopBackendCheck();
+    }
   };
+
+  function startBackendCheck(force = false) {
+    if (backendGate.ready && !force) {
+      updateBackendGateView();
+      return;
+    }
+    window.clearTimeout(backendRetryTimer);
+    checkBackendHealth(force);
+  }
+
+  async function checkBackendHealth(force = false) {
+    const checkToken = ++backendCheckToken;
+    if (force) {
+      backendWakeStartedAt = 0;
+    }
+    if (backendGate.status !== "waking") {
+      setBackendGate({
+        status: "checking",
+        title: "Checking backend",
+        detail: "Contacting the game server...",
+        ready: false,
+        secondsRemaining: null
+      });
+    }
+
+    try {
+      const health = await fetchBackendHealth(DEFAULT_SERVER_URL);
+      if (checkToken !== backendCheckToken) {
+        return;
+      }
+      stopBackendCountdown();
+      backendWakeStartedAt = 0;
+      setBackendGate({
+        status: "ready",
+        title: "Backend connected",
+        detail: `Ready for multiplayer. Players online: ${health.players ?? 0}`,
+        ready: true,
+        secondsRemaining: null
+      });
+    } catch {
+      if (checkToken !== backendCheckToken) {
+        return;
+      }
+      if (!backendWakeStartedAt) {
+        backendWakeStartedAt = Date.now();
+      }
+      setBackendWakingState();
+      startBackendCountdown();
+      backendRetryTimer = window.setTimeout(() => checkBackendHealth(), BACKEND_HEALTH_RETRY_MS);
+    }
+  }
+
+  function setBackendWakingState() {
+    const elapsedSeconds = Math.floor((Date.now() - backendWakeStartedAt) / 1000);
+    const secondsRemaining = Math.max(0, BACKEND_WAKE_WAIT_SECONDS - elapsedSeconds);
+    const detail = secondsRemaining > 0
+      ? `Render may be waking the free instance. Wait ${secondsRemaining} sec.`
+      : "Still waking the backend. Retrying now...";
+    setBackendGate({
+      status: "waking",
+      title: "Backend is starting",
+      detail,
+      ready: false,
+      secondsRemaining
+    });
+  }
+
+  function setBackendGate(nextState) {
+    Object.assign(backendGate, nextState);
+    updateBackendGateView();
+  }
+
+  function updateBackendGateView() {
+    const gate = root.querySelector("#backendGate");
+    const title = root.querySelector("#backendGateTitle");
+    const detail = root.querySelector("#backendGateDetail");
+    const retryButton = root.querySelector("#retryBackendButton");
+    const createButton = root.querySelector("#createRoomButton");
+    const joinButton = root.querySelector("#joinRoomButton");
+    const matchIdInput = root.querySelector("#libraryMatchId");
+
+    if (gate) {
+      gate.dataset.status = backendGate.status;
+    }
+    if (title) {
+      title.textContent = backendGate.title;
+    }
+    if (detail) {
+      detail.textContent = backendGate.detail;
+    }
+    if (retryButton) {
+      retryButton.hidden = backendGate.status === "ready" || backendGate.status === "checking";
+      retryButton.disabled = backendGate.status === "checking";
+    }
+    if (createButton) {
+      createButton.disabled = !backendGate.ready;
+    }
+    if (joinButton) {
+      joinButton.disabled = !backendGate.ready;
+    }
+    if (matchIdInput) {
+      matchIdInput.disabled = !backendGate.ready;
+    }
+  }
+
+  function startBackendCountdown() {
+    if (backendCountdownTimer) {
+      return;
+    }
+    backendCountdownTimer = window.setInterval(() => {
+      if (backendGate.status !== "waking") {
+        stopBackendCountdown();
+        return;
+      }
+      setBackendWakingState();
+    }, 1000);
+  }
+
+  function stopBackendCountdown() {
+    window.clearInterval(backendCountdownTimer);
+    backendCountdownTimer = null;
+  }
+
+  function stopBackendCheck() {
+    backendCheckToken += 1;
+    window.clearTimeout(backendRetryTimer);
+    backendRetryTimer = null;
+    stopBackendCountdown();
+  }
+}
+
+async function fetchBackendHealth(serverUrl) {
+  const healthUrl = appendQuery(toBackendHealthUrl(serverUrl), "wake", Date.now());
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), BACKEND_HEALTH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(healthUrl, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`Health check failed: ${response.status}`);
+    }
+    const payload = await response.json();
+    if (!payload?.ok) {
+      throw new Error("Backend health check did not return ok.");
+    }
+    return payload;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function createBackendRoom({ serverUrl, playerName, accessToken, game }) {
@@ -516,6 +708,20 @@ function appendAccessToken(url, accessToken) {
     return url;
   }
   return appendQuery(url, "access_token", cleanToken);
+}
+
+function toBackendHealthUrl(serverUrl) {
+  const normalizedUrl = normalizeWebSocketUrl(serverUrl)
+    .replace(/^wss:\/\//, "https://")
+    .replace(/^ws:\/\//, "http://");
+  const url = new URL(normalizedUrl);
+  url.pathname = url.pathname.replace(/\/ws\/?$/, "/health");
+  if (!url.pathname.endsWith("/health")) {
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/health`;
+  }
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
 
 function normalizeWebSocketUrl(value) {

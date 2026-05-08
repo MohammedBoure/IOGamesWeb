@@ -197,6 +197,85 @@ input {
   font-weight: 800;
 }
 
+.backend-gate {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 68px;
+  border: 1px solid rgba(34, 73, 88, 0.16);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(234, 246, 252, 0.72);
+}
+
+.backend-gate-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 4px rgba(255, 178, 56, 0.16);
+}
+
+.backend-gate-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.backend-gate strong,
+.backend-gate small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backend-gate strong {
+  font-size: 14px;
+}
+
+.backend-gate small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.backend-gate[data-status="checking"] .backend-gate-dot {
+  background: var(--blue);
+  box-shadow: 0 0 0 4px rgba(27, 141, 255, 0.14);
+  animation: backendPulse 1.2s ease-in-out infinite;
+}
+
+.backend-gate[data-status="ready"] {
+  border-color: rgba(32, 212, 136, 0.34);
+  background: rgba(231, 251, 243, 0.78);
+}
+
+.backend-gate[data-status="ready"] .backend-gate-dot {
+  background: var(--green);
+  box-shadow: 0 0 0 4px rgba(32, 212, 136, 0.16);
+}
+
+.backend-gate[data-status="waking"] {
+  border-color: rgba(255, 178, 56, 0.34);
+  background: rgba(255, 248, 234, 0.78);
+}
+
+.backend-gate .compact {
+  min-width: 74px;
+}
+
+@keyframes backendPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
 .room-actions {
   display: flex;
   flex-wrap: wrap;
@@ -851,6 +930,13 @@ h2 {
   box-shadow: 0 10px 34px rgba(27, 141, 255, 0.24);
 }
 
+.primary-button:disabled,
+.ghost-button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
 .compact {
   min-height: 38px;
   margin-top: 0;
@@ -929,7 +1015,7 @@ h2 {
   margin: 0;
   color: #39525d;
   font-size: 13px;
-  direction: rtl;
+  direction: ltr;
 }
 
 .slider-row {
@@ -970,6 +1056,15 @@ h2 {
 
   .room-actions .primary-button,
   .room-actions .ghost-button {
+    width: 100%;
+  }
+
+  .backend-gate {
+    grid-template-columns: 12px minmax(0, 1fr);
+  }
+
+  .backend-gate .compact {
+    grid-column: 1 / -1;
     width: 100%;
   }
 

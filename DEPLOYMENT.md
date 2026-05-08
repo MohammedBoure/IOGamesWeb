@@ -42,3 +42,7 @@ BACKEND_ACCESS_TOKEN=replace-with-the-same-production-token
 ```
 
 If your host gives you a `PORT` variable, `backend/run.py` can use it automatically.
+
+## Render free instances
+
+The frontend calls `/health` automatically when the home screen loads. This request wakes a sleeping Render free instance, then the UI retries until the backend responds and enables room creation/joining.
