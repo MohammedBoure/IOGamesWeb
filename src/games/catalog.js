@@ -20,7 +20,7 @@ export const games = [
     mode: "racing",
     roomMode: "racing",
     map: "neon_circuit",
-    summary: "A 3D circuit race with checkpoints and drifting.",
+    summary: "A long 3D hillside circuit with irregular turns, elevation changes, checkpoints, and drifting.",
     controls: "Z accelerate, S brake, Q/D steer, Space drift",
     label: "Racing",
     pace: "Circuit laps",
