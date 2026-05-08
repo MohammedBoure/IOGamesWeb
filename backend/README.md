@@ -68,7 +68,9 @@ Create a match:
   "settings": {
     "mode": "deathmatch",
     "map": "aim_arena",
-    "max_players": 12
+    "max_players": 12,
+    "duration_seconds": 180,
+    "score_limit": 8
   }
 }
 ```
@@ -119,6 +121,17 @@ Other messages:
 { "type": "set_ready", "ready": true }
 { "type": "start_match" }
 { "type": "ping" }
+```
+
+The host starts or restarts the round with `start_match`. During a round, the backend tracks `duration_seconds`, `score_limit`, `remaining_seconds`, player health, kills, and deaths. When the timer expires or a player reaches the score limit, clients receive:
+
+```json
+{
+  "type": "match_finished",
+  "reason": "score",
+  "winner_id": "player_123",
+  "match": {}
+}
 ```
 
 ## Notes

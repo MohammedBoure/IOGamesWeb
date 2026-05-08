@@ -304,6 +304,10 @@ const network = {
   connecting: false,
   clientId: null,
   matchId: null,
+  matchHostId: null,
+  matchStatus: null,
+  matchDuration: MATCH_DURATION_SECONDS,
+  matchScoreLimit: MATCH_SCORE_LIMIT,
   afterConnect: null,
   sendTimer: 0
 };
@@ -1983,7 +1987,12 @@ function startGame() {
   if (state.mode === GAME_MODES.RACING) {
     resetRace();
   } else {
-    startShooterCountdown();
+    const serverStartRequested = requestServerMatchStart();
+    if (!network.matchId || network.matchStatus === "playing" || serverStartRequested) {
+      startShooterCountdown();
+    } else {
+      enterShooterWarmup(isLocalMatchHost() ? "Start match" : "Waiting for host");
+    }
   }
   hud.start.classList.remove("active");
   hud.pause.classList.remove("active");
@@ -2128,7 +2137,12 @@ function resetRound(lockPointer) {
   if (lockPointer) {
     audio.resume();
     state.running = true;
-    startShooterCountdown();
+    const serverStartRequested = requestServerMatchStart();
+    if (!network.matchId || network.matchStatus === "playing" || serverStartRequested) {
+      startShooterCountdown();
+    } else {
+      enterShooterWarmup(isLocalMatchHost() ? "Start match" : "Waiting for host");
+    }
     hud.start.classList.remove("active");
     renderer.domElement.requestPointerLock();
   }
@@ -2396,10 +2410,23 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-function startShooterCountdown() {
+function enterShooterWarmup(message = "Waiting") {
+  state.matchPhase = "warmup";
+  state.countdownTimer = MATCH_COUNTDOWN_SECONDS;
+  state.matchTimer = getMatchDurationSeconds();
+  state.respawnTimer = 0;
+  state.damageFlash = 0;
+  state.firing = false;
+  hud.matchEnd?.classList.remove("active");
+  showToast(message);
+}
+
+function startShooterCountdown(options = {}) {
   state.matchPhase = "countdown";
   state.countdownTimer = MATCH_COUNTDOWN_SECONDS;
-  state.matchTimer = MATCH_DURATION_SECONDS;
+  state.matchTimer = Number.isFinite(options.remainingSeconds)
+    ? Math.max(0, Number(options.remainingSeconds))
+    : getMatchDurationSeconds();
   state.respawnTimer = 0;
   state.damageFlash = 0;
   hud.matchEnd?.classList.remove("active");
@@ -2415,7 +2442,7 @@ function updateShooterMatchFlow(dt) {
     state.countdownTimer -= dt;
     if (state.countdownTimer <= 0) {
       state.matchPhase = "playing";
-      state.matchTimer = MATCH_DURATION_SECONDS;
+      state.matchTimer = Math.min(state.matchTimer, getMatchDurationSeconds());
       showToast("Fight");
       audio.boost();
     }
@@ -2437,7 +2464,7 @@ function updateShooterMatchFlow(dt) {
   }
 
   const leader = getCurrentScoreLeader();
-  if (leader && leader.kills >= MATCH_SCORE_LIMIT) {
+  if (leader && leader.kills >= getMatchScoreLimit()) {
     finishShooterMatch("score", leader);
     return false;
   }
@@ -2462,7 +2489,7 @@ function finishShooterMatch(reason = "time", leader = null) {
 
   const title = localWon ? "Victory" : winner ? `${winner.name ?? "Player"} Wins` : "Round Complete";
   const detail = reason === "score"
-    ? `Score limit reached: ${winner?.kills ?? MATCH_SCORE_LIMIT}/${MATCH_SCORE_LIMIT}.`
+    ? `Score limit reached: ${winner?.kills ?? getMatchScoreLimit()}/${getMatchScoreLimit()}.`
     : `Time expired. Top score: ${winner?.kills ?? state.localScore}.`;
   if (hud.matchEndTitle) {
     hud.matchEndTitle.textContent = title;
@@ -2485,6 +2512,14 @@ function getCurrentScoreLeader() {
     return null;
   }
   return entries[0];
+}
+
+function getMatchDurationSeconds() {
+  return Number.isFinite(network.matchDuration) ? network.matchDuration : MATCH_DURATION_SECONDS;
+}
+
+function getMatchScoreLimit() {
+  return Number.isFinite(network.matchScoreLimit) ? network.matchScoreLimit : MATCH_SCORE_LIMIT;
 }
 
 function updateGame(dt, time) {
@@ -3273,7 +3308,7 @@ function hitTarget(target, hit, profile = null) {
   spawnImpactSparks(hit.point, profile?.hitColor ?? 0xffdf8a, profile?.damage ?? 1);
   showToast(profile ? `${profile.name} hit` : "Hit");
   audio.hit();
-  if (!network.matchId && state.localScore >= MATCH_SCORE_LIMIT) {
+  if (!network.matchId && state.localScore >= getMatchScoreLimit()) {
     finishShooterMatch("score", getCurrentScoreLeader());
   }
 }
@@ -3738,7 +3773,7 @@ function updateMatchHud() {
   if (hud.matchGoalValue) {
     const leader = getCurrentScoreLeader();
     const leaderText = leader ? `${leader.name ?? "Player"} ${leader.kills ?? 0}` : `${state.localScore}`;
-    hud.matchGoalValue.textContent = `First to ${MATCH_SCORE_LIMIT} | Lead ${leaderText}`;
+    hud.matchGoalValue.textContent = `First to ${getMatchScoreLimit()} | Lead ${leaderText}`;
   }
   if (hud.pickupNotice) {
     hud.pickupNotice.classList.toggle("active", state.pickupNoticeTimer > 0);
@@ -3991,6 +4026,10 @@ function connectNetwork(afterConnect = null) {
       network.socket = null;
       network.clientId = null;
       network.matchId = null;
+      network.matchHostId = null;
+      network.matchStatus = null;
+      network.matchDuration = MATCH_DURATION_SECONDS;
+      network.matchScoreLimit = MATCH_SCORE_LIMIT;
       network.afterConnect = null;
       localSnapshot.id = "local";
       setMatchIdInput("");
@@ -4015,7 +4054,9 @@ function createNetworkMatch() {
       settings: {
         mode: state.mode === GAME_MODES.RACING ? "racing" : "deathmatch",
         map: state.mode === GAME_MODES.RACING ? "neon_circuit" : "aim_arena",
-        max_players: 12
+        max_players: 12,
+        duration_seconds: MATCH_DURATION_SECONDS,
+        score_limit: MATCH_SCORE_LIMIT
       }
     });
   });
@@ -4045,6 +4086,10 @@ function disconnectNetwork() {
   network.socket = null;
   network.clientId = null;
   network.matchId = null;
+  network.matchHostId = null;
+  network.matchStatus = null;
+  network.matchDuration = MATCH_DURATION_SECONDS;
+  network.matchScoreLimit = MATCH_SCORE_LIMIT;
   network.afterConnect = null;
   localSnapshot.id = "local";
   setMatchIdInput("");
@@ -4107,6 +4152,11 @@ function handleNetworkMessage(message) {
     return;
   }
 
+  if (message.type === "match_finished") {
+    handleMatchFinished(message);
+    return;
+  }
+
   if (message.type === "lobby_matches" && !network.matchId) {
     const count = Array.isArray(message.matches) ? message.matches.length : 0;
     setNetworkStatus(network.connected ? `Connected, available matches: ${count}` : "Disconnected");
@@ -4151,6 +4201,9 @@ function handleNetworkMessage(message) {
 
   if (message.type === "error") {
     setNetworkStatus(`${message.code}: ${message.message}`);
+    if (message.code === "match_not_playing" && state.mode === GAME_MODES.SHOOTER) {
+      enterShooterWarmup(isLocalMatchHost() ? "Start match" : "Waiting for host");
+    }
   }
 }
 
@@ -4169,8 +4222,18 @@ function syncMatchState(match) {
     }
   }
   network.matchId = match.id;
+  network.matchHostId = match.host_id ?? null;
+  network.matchStatus = match.status ?? "lobby";
+  network.matchDuration = Number.isFinite(Number(match.duration_seconds))
+    ? Number(match.duration_seconds)
+    : MATCH_DURATION_SECONDS;
+  network.matchScoreLimit = Number.isFinite(Number(match.score_limit))
+    ? Number(match.score_limit)
+    : MATCH_SCORE_LIMIT;
   setMatchIdInput(match.id);
-  setNetworkStatus(`In match: ${match.id} | Players: ${match.players?.length ?? 1}/${match.max_players ?? "?"}`);
+  setNetworkStatus(`In match: ${match.id} | ${network.matchStatus} | Players: ${match.players?.length ?? 1}/${match.max_players ?? "?"}`);
+  updateScoreboard(match.players ?? []);
+  syncServerRoundState(match);
   if (runtimeOptions.autoStart && !state.running && runtimeOptions.roomAction === "join") {
     startGame();
   }
@@ -4184,7 +4247,6 @@ function syncMatchState(match) {
       maxPlayers: match.max_players ?? null
     }
   }));
-  updateScoreboard(match.players ?? []);
 
   if (state.mode === GAME_MODES.RACING) {
     const seen = new Set();
@@ -4219,6 +4281,80 @@ function syncMatchState(match) {
       removeRemotePlayer(playerId);
     }
   }
+}
+
+function syncServerRoundState(match) {
+  if (state.mode !== GAME_MODES.SHOOTER || !match) {
+    return;
+  }
+
+  const remainingSeconds = Number.isFinite(Number(match.remaining_seconds))
+    ? Math.max(0, Number(match.remaining_seconds))
+    : null;
+
+  if (match.status === "playing") {
+    if (remainingSeconds !== null && state.matchPhase === "playing") {
+      state.matchTimer = remainingSeconds;
+    }
+    if (state.matchPhase === "playing" || state.matchPhase === "countdown") {
+      return;
+    }
+
+    const elapsed = remainingSeconds === null ? 0 : Math.max(0, getMatchDurationSeconds() - remainingSeconds);
+    if (elapsed > MATCH_COUNTDOWN_SECONDS + 1) {
+      state.matchPhase = "playing";
+      state.matchTimer = remainingSeconds ?? getMatchDurationSeconds();
+      hud.matchEnd?.classList.remove("active");
+      showToast("Match live");
+    } else {
+      startShooterCountdown({ remainingSeconds });
+    }
+    return;
+  }
+
+  if (match.status === "finished") {
+    const winner = getPlayerInfoById(match.winner_id) ?? getCurrentScoreLeader();
+    finishShooterMatch(match.finish_reason || "time", winner);
+    return;
+  }
+
+  if (network.matchId && state.running && match.status === "lobby" && isLocalMatchHost()) {
+    if (requestServerMatchStart()) {
+      startShooterCountdown();
+      return;
+    }
+  }
+
+  if (network.matchId && state.running && state.matchPhase !== "warmup") {
+    enterShooterWarmup(isLocalMatchHost() ? "Start match" : "Waiting for host");
+  }
+}
+
+function handleMatchFinished(message) {
+  if (message.match) {
+    syncMatchState(message.match);
+    return;
+  }
+  const winner = getPlayerInfoById(message.winner_id) ?? getCurrentScoreLeader();
+  finishShooterMatch(message.reason || "time", winner);
+}
+
+function getPlayerInfoById(playerId) {
+  if (!playerId) {
+    return null;
+  }
+  return scorePlayers.get(playerId) ?? null;
+}
+
+function isLocalMatchHost() {
+  return Boolean(network.clientId && network.matchHostId && network.clientId === network.matchHostId);
+}
+
+function requestServerMatchStart() {
+  if (!network.matchId || !isLocalMatchHost()) {
+    return false;
+  }
+  return sendNetwork({ type: "start_match" });
 }
 
 function handlePlayerDamaged(message) {

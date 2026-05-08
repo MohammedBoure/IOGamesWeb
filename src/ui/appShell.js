@@ -783,7 +783,9 @@ function createBackendRoom({ serverUrl, playerName, accessToken, game }) {
           settings: {
             mode: game.roomMode || (game.mode === "racing" ? "racing" : "deathmatch"),
             map: game.map || (game.mode === "racing" ? "neon_circuit" : "aim_arena"),
-            max_players: 12
+            max_players: 12,
+            duration_seconds: 180,
+            score_limit: 8
           }
         }));
         return;

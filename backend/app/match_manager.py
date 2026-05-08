@@ -25,6 +25,9 @@ WEAPON_RULES: dict[str, JsonDict] = {
     "lightning-gun": {"damage": 1, "interval": 0.17, "range": 44, "magazine": 14, "reload": 1.25},
 }
 DEFAULT_WEAPON_RULE: JsonDict = {"damage": 1, "interval": 0.12, "range": 95, "magazine": 18, "reload": 1.2}
+DEFAULT_MATCH_DURATION_SECONDS = 180
+DEFAULT_MATCH_SCORE_LIMIT = 8
+RESPAWN_DELAY_SECONDS = 1
 
 
 class ClientMessageError(Exception):
@@ -63,9 +66,17 @@ class Match:
     mode: str = "deathmatch"
     map_name: str = "aim_arena"
     max_players: int = 12
+    duration_seconds: int = DEFAULT_MATCH_DURATION_SECONDS
+    score_limit: int = DEFAULT_MATCH_SCORE_LIMIT
     status: str = "lobby"
     players: set[str] = field(default_factory=set)
     created_at: str = field(default_factory=lambda: utc_now())
+    started_at: str | None = None
+    finished_at: str | None = None
+    winner_id: str | None = None
+    finish_reason: str | None = None
+    started_at_monotonic: float | None = None
+    ends_at_monotonic: float | None = None
 
 
 class MatchManager:
@@ -73,6 +84,7 @@ class MatchManager:
         self._players: dict[str, Player] = {}
         self._matches: dict[str, Match] = {}
         self._respawn_tasks: dict[str, asyncio.Task] = {}
+        self._match_finish_tasks: dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
 
     @property
@@ -172,6 +184,16 @@ class MatchManager:
         match_mode = sanitize_mode(settings.get("mode", "deathmatch"))
         map_name = sanitize_mode(settings.get("map", "aim_arena"))
         max_players = clamp_int(settings.get("max_players", 12), 2, 24)
+        duration_seconds = clamp_int(
+            settings.get("duration_seconds", settings.get("duration", DEFAULT_MATCH_DURATION_SECONDS)),
+            60,
+            900,
+        )
+        score_limit = clamp_int(
+            settings.get("score_limit", settings.get("scoreLimit", DEFAULT_MATCH_SCORE_LIMIT)),
+            1,
+            50,
+        )
 
         async with self._lock:
             player = self._require_player_locked(player_id)
@@ -181,6 +203,8 @@ class MatchManager:
                 mode=match_mode,
                 map_name=map_name,
                 max_players=max_players,
+                duration_seconds=duration_seconds,
+                score_limit=score_limit,
             )
             events = self._leave_match_locked(player_id, reason="switch_match")
             match.players.add(player_id)
@@ -273,13 +297,12 @@ class MatchManager:
             player = self._require_player_locked(player_id)
             if not player.match_id:
                 raise ClientMessageError("not_in_match", "Player is not in a match.")
-            if not player.alive:
-                raise ClientMessageError("player_dead", "Dead players cannot send actions.")
             match = self._matches[player.match_id]
             if match.host_id != player_id:
                 raise ClientMessageError("not_host", "Only the host can start the match.")
-            match.status = "playing"
+            self._start_match_round_locked(match)
             events = self._match_state_events_locked(match.id)
+            events.append((set(self._players), {"type": "lobby_matches", "matches": self._public_matches_locked()}))
             match_id = match.id
 
         await self._flush(events)
@@ -327,6 +350,8 @@ class MatchManager:
                 raise ClientMessageError("target_dead", "Target is already dead.")
 
             match = self._matches[attacker.match_id]
+            if match.status != "playing":
+                raise ClientMessageError("match_not_playing", "Match is not currently playing.")
             weapon = sanitize_weapon_id(payload.get("weapon"))
             rule = resolve_weapon_rule(weapon)
             validate_recent_shot(attacker, weapon, rule)
@@ -338,6 +363,7 @@ class MatchManager:
             match_state = self._public_match_state_locked(match.id)
             recipients = set(match.players)
             should_respawn = False
+            was_kill = False
 
             if victim.health > 0:
                 events = [
@@ -360,6 +386,7 @@ class MatchManager:
                     (recipients, {"type": "match_state", "match": match_state}),
                 ]
             else:
+                was_kill = True
                 attacker.kills += 1
                 victim.deaths += 1
                 victim.alive = False
@@ -367,6 +394,8 @@ class MatchManager:
                 victim.state["alive"] = False
                 victim.state["velocity"] = [0, 0, 0]
                 self._cancel_respawn_locked(victim.id)
+                round_finished = attacker.kills >= match.score_limit
+                finish_events = self._finish_match_locked(match, "score", attacker.id) if round_finished else []
                 match_state = self._public_match_state_locked(match.id)
                 events = [
                     (
@@ -383,12 +412,15 @@ class MatchManager:
                             "server_time": utc_now(),
                         },
                     ),
-                    (recipients, {"type": "match_state", "match": match_state}),
                 ]
-                should_respawn = True
+                if finish_events:
+                    events.extend(finish_events)
+                else:
+                    events.append((recipients, {"type": "match_state", "match": match_state}))
+                should_respawn = not round_finished
 
         await self._flush(events)
-        if should_respawn:
+        if was_kill:
             logger.info(
                 "player killed match=%s killer=%s victim=%s weapon=%s damage=%s score=%s-%s",
                 match.id,
@@ -399,7 +431,8 @@ class MatchManager:
                 attacker.kills,
                 attacker.deaths,
             )
-            self._respawn_tasks[victim.id] = asyncio.create_task(self._respawn_player_after(victim.id, match.id))
+            if should_respawn:
+                self._respawn_tasks[victim.id] = asyncio.create_task(self._respawn_player_after(victim.id, match.id))
         else:
             logger.info(
                 "player damaged match=%s attacker=%s victim=%s weapon=%s damage=%s health=%s/%s",
@@ -424,6 +457,8 @@ class MatchManager:
             action_type = str(payload.get("action", payload.get("type", "player_action")))[:32]
             clean_payload = clean_action_payload(payload.get("payload", payload))
             if action_type == "shoot":
+                if match.status != "playing":
+                    raise ClientMessageError("match_not_playing", "Match is not currently playing.")
                 weapon = sanitize_weapon_id(clean_payload.get("weapon"))
                 consume_weapon_shot(player, weapon, resolve_weapon_rule(weapon))
             message = {
@@ -437,11 +472,11 @@ class MatchManager:
         await self._send_many(recipients, message)
 
     async def _respawn_player_after(self, player_id: str, match_id: str) -> None:
-        await asyncio.sleep(1)
+        await asyncio.sleep(RESPAWN_DELAY_SECONDS)
         async with self._lock:
             player = self._players.get(player_id)
             match = self._matches.get(match_id)
-            if not player or not match or player.match_id != match_id:
+            if not player or not match or player.match_id != match_id or match.status != "playing":
                 self._respawn_tasks.pop(player_id, None)
                 return
 
@@ -497,6 +532,7 @@ class MatchManager:
 
         match.players.discard(player_id)
         if not match.players:
+            self._cancel_match_finish_locked(match.id)
             match.status = "lobby"
             return events
 
@@ -515,9 +551,82 @@ class MatchManager:
         match = self._matches[match_id]
         return [(set(match.players), {"type": "match_state", "match": self._public_match_state_locked(match_id)})]
 
+    def _start_match_round_locked(self, match: Match) -> None:
+        self._cancel_match_finish_locked(match.id)
+        now = time.monotonic()
+        match.status = "playing"
+        match.started_at = utc_now()
+        match.finished_at = None
+        match.winner_id = None
+        match.finish_reason = None
+        match.started_at_monotonic = now
+        match.ends_at_monotonic = now + match.duration_seconds
+        for player_id in list(match.players):
+            player = self._players.get(player_id)
+            if player:
+                reset_combat_player(player)
+        self._match_finish_tasks[match.id] = asyncio.create_task(self._finish_match_after(match.id))
+
+    async def _finish_match_after(self, match_id: str) -> None:
+        async with self._lock:
+            match = self._matches.get(match_id)
+            sleep_seconds = match.duration_seconds if match else 0
+
+        await asyncio.sleep(max(0.1, sleep_seconds))
+
+        async with self._lock:
+            match = self._matches.get(match_id)
+            if not match or match.status != "playing":
+                self._match_finish_tasks.pop(match_id, None)
+                return
+            events = self._finish_match_locked(match, "time", self._match_leader_id_locked(match))
+            self._match_finish_tasks.pop(match_id, None)
+
+        await self._flush(events)
+        logger.info("match finished id=%s reason=time winner=%s", match_id, match.winner_id or "-")
+
+    def _finish_match_locked(self, match: Match, reason: str, winner_id: str | None) -> list[tuple[set[str], JsonDict]]:
+        match.status = "finished"
+        match.finished_at = utc_now()
+        match.winner_id = winner_id
+        match.finish_reason = reason
+        match.ends_at_monotonic = time.monotonic()
+        self._cancel_match_finish_locked(match.id)
+        for player_id in list(match.players):
+            self._cancel_respawn_locked(player_id)
+
+        recipients = set(match.players)
+        match_state = self._public_match_state_locked(match.id)
+        return [
+            (
+                recipients,
+                {
+                    "type": "match_finished",
+                    "reason": reason,
+                    "winner_id": winner_id,
+                    "match": match_state,
+                    "server_time": utc_now(),
+                },
+            ),
+            (recipients, {"type": "match_state", "match": match_state}),
+            (set(self._players), {"type": "lobby_matches", "matches": self._public_matches_locked()}),
+        ]
+
+    def _match_leader_id_locked(self, match: Match) -> str | None:
+        players = [self._players[player_id] for player_id in match.players if player_id in self._players]
+        if not players:
+            return None
+        players.sort(key=lambda player: (-player.kills, player.deaths, player.name.lower(), player.id))
+        return players[0].id
+
     def _cancel_respawn_locked(self, player_id: str) -> None:
         task = self._respawn_tasks.pop(player_id, None)
         if task and not task.done():
+            task.cancel()
+
+    def _cancel_match_finish_locked(self, match_id: str) -> None:
+        task = self._match_finish_tasks.pop(match_id, None)
+        if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
 
     def _require_player_locked(self, player_id: str) -> Player:
@@ -536,6 +645,11 @@ class MatchManager:
                 "status": match.status,
                 "players": len(match.players),
                 "max_players": match.max_players,
+                "duration_seconds": match.duration_seconds,
+                "score_limit": match.score_limit,
+                "remaining_seconds": self._match_remaining_seconds(match),
+                "winner_id": match.winner_id,
+                "finish_reason": match.finish_reason,
                 "created_at": match.created_at,
             }
             for match in self._matches.values()
@@ -550,6 +664,13 @@ class MatchManager:
             "map": match.map_name,
             "status": match.status,
             "max_players": match.max_players,
+            "duration_seconds": match.duration_seconds,
+            "score_limit": match.score_limit,
+            "remaining_seconds": self._match_remaining_seconds(match),
+            "started_at": match.started_at,
+            "finished_at": match.finished_at,
+            "winner_id": match.winner_id,
+            "finish_reason": match.finish_reason,
             "created_at": match.created_at,
             "players": [
                 self._public_player(self._players[player_id])
@@ -573,6 +694,11 @@ class MatchManager:
             "connected_at": player.connected_at,
             "last_seen": player.last_seen,
         }
+
+    def _match_remaining_seconds(self, match: Match) -> int | None:
+        if match.status != "playing" or match.ends_at_monotonic is None:
+            return None
+        return max(0, int(round(match.ends_at_monotonic - time.monotonic())))
 
     async def _broadcast_lobby(self) -> None:
         async with self._lock:
